@@ -229,12 +229,19 @@ if uploaded_file:
                     # Extract selections from events
                     selected_utils = []
                     if util_event and "selection" in util_event and "points" in util_event["selection"]:
-                        # Plotly pie chart selections return 'label' for the slice name
-                        selected_utils = [p.get("label", "") for p in util_event["selection"]["points"]]
-                        
+                        for p in util_event["selection"]["points"]:
+                            if "label" in p:
+                                selected_utils.append(p["label"])
+                            elif "point_index" in p and p["point_index"] < len(util_counts):
+                                selected_utils.append(util_counts.iloc[p["point_index"]]["Category"])
+                                
                     selected_acts = []
                     if act_event and "selection" in act_event and "points" in act_event["selection"]:
-                        selected_acts = [p.get("label", "") for p in act_event["selection"]["points"]]
+                        for p in act_event["selection"]["points"]:
+                            if "label" in p:
+                                selected_acts.append(p["label"])
+                            elif "point_index" in p and p["point_index"] < len(act_counts):
+                                selected_acts.append(act_counts.iloc[p["point_index"]]["Status"])
                         
                     # Also keep the "Requires Action" toggle just in case
                     action_filter = st.selectbox("Quick Filter:", ["Show All Accounts", "⚠️ Requires Action Only", "✅ Healthy Only"], index=0)
