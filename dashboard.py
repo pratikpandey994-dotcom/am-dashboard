@@ -225,18 +225,20 @@ if selected_dataset and selected_dataset in st.session_state.datasets:
                     util_counts.columns = ['Category', 'Count']
                     fig1 = px.pie(util_counts, names='Category', values='Count', hole=0.4, 
                                   color='Category', 
+                                  custom_data=['Category'],
                                   color_discrete_map={'High (>70%)':'#d62728', 'Medium (20-70%)':'#ff7f0e', 'Low (<20%)':'#2ca02c'})
                     fig1.update_traces(textposition='inside', textinfo='percent+label')
                     fig1.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
                     # Make pie chart interactive
                     util_event = st.plotly_chart(fig1, use_container_width=True, on_select="rerun", selection_mode="points", key="util_pie")
-                    
+
                 with c2:
                     st.subheader("Activity Status")
                     act_counts = account_df['Activity_Status'].value_counts().reset_index()
                     act_counts.columns = ['Status', 'Count']
                     fig2 = px.pie(act_counts, names='Status', values='Count', hole=0.4,
                                   color='Status',
+                                  custom_data=['Status'],
                                   color_discrete_map={'Inactive (>60 days)':'#7f7f7f', 'Dormant (30-60 days)':'#ffbb78', 'Active (<30 days)':'#98df8a', 'Unknown':'#c7c7c7'})
                     fig2.update_traces(textposition='inside', textinfo='percent+label')
                     fig2.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
@@ -244,28 +246,31 @@ if selected_dataset and selected_dataset in st.session_state.datasets:
                     act_event = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", selection_mode="points", key="act_pie")
 
                 st.divider()
-                
+
                 # --- INTERACTIVE ACCOUNT EXPLORER ---
                 st.subheader("📂 Interactive Account Explorer")
                 st.write("Click on any slice in the pie charts above to filter the accounts below. If no slice is selected, all accounts are shown.")
-                
+
                 # Extract selections from events
                 selected_utils = []
                 if util_event and "selection" in util_event and "points" in util_event["selection"]:
                     for p in util_event["selection"]["points"]:
-                        if "label" in p:
+                        if "customdata" in p and len(p["customdata"]) > 0:
+                            selected_utils.append(p["customdata"][0])
+                        elif "label" in p:
                             selected_utils.append(p["label"])
                         elif "point_index" in p and p["point_index"] < len(util_counts):
                             selected_utils.append(util_counts.iloc[p["point_index"]]["Category"])
-                            
+
                 selected_acts = []
                 if act_event and "selection" in act_event and "points" in act_event["selection"]:
                     for p in act_event["selection"]["points"]:
-                        if "label" in p:
+                        if "customdata" in p and len(p["customdata"]) > 0:
+                            selected_acts.append(p["customdata"][0])
+                        elif "label" in p:
                             selected_acts.append(p["label"])
                         elif "point_index" in p and p["point_index"] < len(act_counts):
-                            selected_acts.append(act_counts.iloc[p["point_index"]]["Status"])
-                    
+                            selected_acts.append(act_counts.iloc[p["point_index"]]["Status"])                    
                 # Also keep the "Requires Action" toggle just in case
                 action_filter = st.selectbox("Quick Filter:", ["Show All Accounts", "⚠️ Requires Action Only", "✅ Healthy Only"], index=0)
                 
