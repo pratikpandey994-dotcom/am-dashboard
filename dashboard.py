@@ -64,19 +64,42 @@ def load_data(file):
 # --- UI LAYOUT ---
 
 st.title("📊 Smart Analytics Dashboard")
-st.markdown("Upload **any** Excel or CSV file to analyze Account Limits, Utilization, and Risk.")
+st.markdown("Upload **any** Excel or CSV files to analyze Account Limits, Utilization, and Risk.")
+
+# Initialize session state for stored datasets
+if 'datasets' not in st.session_state:
+    st.session_state.datasets = {}
 
 with st.sidebar:
     st.header("Data Source")
-    uploaded_file = st.file_uploader("Upload Data File", type=["xlsx", "xls", "csv"])
-
-if uploaded_file:
-    df = load_data(uploaded_file)
+    uploaded_files = st.file_uploader("Upload Data Files", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
     
-    if df is None or df.empty:
-        st.error("Could not read the file. Please ensure it's a valid CSV or Excel document with data.")
-    else:
-        mapping = dynamic_map_columns(df)
+    # Process uploaded files
+    if uploaded_files:
+        for file in uploaded_files:
+            # Only load if not already in session state or if modified
+            if file.name not in st.session_state.datasets:
+                with st.spinner(f"Loading {file.name}..."):
+                    loaded_df = load_data(file)
+                    if loaded_df is not None and not loaded_df.empty:
+                        st.session_state.datasets[file.name] = loaded_df
+
+    # Allow user to select which dataset to view if multiple are loaded
+    selected_dataset = None
+    if st.session_state.datasets:
+        st.divider()
+        st.subheader("Select Dataset to Analyze")
+        dataset_names = list(st.session_state.datasets.keys())
+        selected_dataset = st.selectbox("Active Dataset", dataset_names)
+        
+        # Optional: Clear data
+        if st.button("Clear All Data"):
+            st.session_state.datasets = {}
+            st.rerun()
+
+if selected_dataset and selected_dataset in st.session_state.datasets:
+    df = st.session_state.datasets[selected_dataset]
+    mapping = dynamic_map_columns(df)
         
         # --- TABBED INTERFACE ---
         tab1, tab2, tab3 = st.tabs(["🎯 Portfolio Intelligence", "🔍 Smart Auto-Discovery", "📋 Raw Data"])
