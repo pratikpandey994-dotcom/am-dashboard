@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from fuzzywuzzy import process
+from datetime import datetime
 
 # Set page config
 st.set_page_config(page_title="Smart Analytics Dashboard", layout="wide")
@@ -14,7 +15,7 @@ def dynamic_map_columns(df):
     cols = df.columns.tolist()
     mapping = {}
     
-    # Expanded candidates explicitly splitting Limit and Utilization
+    # Expanded candidates explicitly splitting Limit, Utilization, and Dates
     candidates = {
         "AM": ["am_name", "owner", "account_manager", "rm_name", "relationship_manager", "assigned_to", "am_email"],
         "Account": ["company", "buyer", "seller", "account_name", "client", "customer"],
@@ -23,7 +24,7 @@ def dynamic_map_columns(df):
         "Revenue": ["realised revenue", "booked_revenue", "revenue", "mrr", "arr", "total_fees", "amount", "sales"],
         "Status": ["utilization_status", "status", "stage", "state"],
         "DPD": ["dpd", "overdue_days", "days_past_due"],
-        "Date": ["date", "created", "closed", "updated", "disbursed", "settlement", "invoice"]
+        "TransactionDate": ["last_disbursed_date", "disbursed_date", "invoice date", "created date", "date", "updated date"]
     }
     
     for key, choices in candidates.items():
@@ -78,11 +79,11 @@ if uploaded_file:
         mapping = dynamic_map_columns(df)
         
         # --- TABBED INTERFACE ---
-        tab1, tab2, tab3 = st.tabs(["🎯 Limits & Utilization", "🔍 Smart Auto-Discovery", "📋 Raw Data"])
+        tab1, tab2, tab3 = st.tabs(["🎯 Portfolio Intelligence", "🔍 Smart Auto-Discovery", "📋 Raw Data"])
         
-        # TAB 1: Business Logic focusing on Limits vs Utilization
+        # TAB 1: Advanced Business Logic focusing on categorization and action
         with tab1:
-            st.markdown("### Portfolio Overview")
+            st.markdown("### Intelligent Portfolio Overview")
             if not mapping:
                 st.info("Could not auto-detect standard business columns (AM, Account, Limit, Utilization). Try the 'Smart Auto-Discovery' tab!")
             else:
@@ -101,122 +102,135 @@ if uploaded_file:
                     plot_df[mapping["Limit"][0]] = pd.to_numeric(plot_df[mapping["Limit"][0]], errors='coerce').fillna(0)
                 if "Utilization" in mapping:
                     plot_df[mapping["Utilization"][0]] = pd.to_numeric(plot_df[mapping["Utilization"][0]], errors='coerce').fillna(0)
-
-                # KPIs
-                m1, m2, m3, m4 = st.columns(4)
                 
-                # Metric 1: Total Accounts
-                if "Account" in mapping:
-                    acc_col = mapping["Account"][0]
-                    m1.metric("Total Unique Accounts", plot_df[acc_col].nunique())
-                else:
-                    m1.metric("Total Rows", len(plot_df))
+                # --- CALCULATE ADVANCED METRICS ---
+                
+                acc_col = mapping.get("Account", [None])[0]
+                lim_col = mapping.get("Limit", [None])[0]
+                util_col = mapping.get("Utilization", [None])[0]
+                stat_col = mapping.get("Status", [None])[0]
+                date_col = mapping.get("TransactionDate", [None])[0]
+                dpd_col = mapping.get("DPD", [None])[0]
+                
+                if acc_col and lim_col and util_col:
+                    # Aggregate at account level to avoid duplicate metric calculations
+                    account_df = plot_df.groupby(acc_col).agg(
+                        Total_Limit=(lim_col, 'sum'),
+                        Total_Utilization=(util_col, 'sum')
+                    ).reset_index()
                     
-                # Metric 2: Total Facility Limit
-                total_limit = 0
-                if "Limit" in mapping:
-                    total_limit = plot_df[mapping["Limit"][0]].sum()
-                    m2.metric("Total Facility Limit", f"${total_limit:,.0f}")
-                else:
-                    m2.metric("Total Facility Limit", "N/A")
+                    # Calculate Utilization Percentage Category
+                    # Avoid division by zero
+                    account_df['Total_Limit_Safe'] = account_df['Total_Limit'].replace(0, pd.NA)
+                    account_df['Utilization_Pct'] = (account_df['Total_Utilization'] / account_df['Total_Limit_Safe']) * 100
+                    account_df['Utilization_Pct'] = account_df['Utilization_Pct'].fillna(0)
                     
-                # Metric 3: Total Utilization
-                total_utilization = 0
-                if "Utilization" in mapping:
-                    total_utilization = plot_df[mapping["Utilization"][0]].sum()
-                    m3.metric("Total Utilization", f"${total_utilization:,.0f}")
-                else:
-                    m3.metric("Total Utilization", "N/A")
-                
-                # Metric 4: Utilization % or Risk
-                if total_limit > 0:
-                    util_pct = (total_utilization / total_limit) * 100
-                    m4.metric("Overall Utilization %", f"{util_pct:.1f}%")
-                elif "Status" in mapping:
-                    stat_col = mapping["Status"][0]
-                    risk_mask = plot_df[stat_col].astype(str).str.contains("suspended|risk|overdue", case=False, na=False)
-                    if "Account" in mapping:
-                        risk_count = plot_df[risk_mask][acc_col].nunique()
+                    def categorize_util(pct):
+                        if pct >= 80: return 'High (>80%)'
+                        elif pct >= 30: return 'Medium (30-80%)'
+                        else: return 'Low (<30%)'
+                        
+                    account_df['Utilization_Category'] = account_df['Utilization_Pct'].apply(categorize_util)
+                    
+                    # Merge Status if available
+                    if stat_col:
+                        # Get the most common status per account
+                        status_df = plot_df.groupby(acc_col)[stat_col].agg(lambda x: x.mode()[0] if not x.mode().empty else 'Unknown').reset_index()
+                        account_df = account_df.merge(status_df, on=acc_col, how='left')
                     else:
-                        risk_count = risk_mask.sum()
-                    m4.metric("Accounts at Risk", risk_count, delta_color="inverse")
-                else:
-                    m4.metric("Accounts at Risk", "N/A")
-
-                st.divider()
-                
-                # Visualizations
-                c1, c2 = st.columns([2, 1])
-                
-                # Chart 1: Limits vs Utilization (Grouped Bar)
-                with c1:
-                    if "Account" in mapping and "Limit" in mapping and "Utilization" in mapping:
-                        st.subheader("Limits vs. Utilization (Top Accounts)")
-                        acc_col = mapping["Account"][0]
-                        lim_col = mapping["Limit"][0]
-                        util_col = mapping["Utilization"][0]
+                        account_df[stat_col] = 'Unknown'
                         
-                        # Aggregate by account
-                        agg_df = plot_df.groupby(acc_col)[[lim_col, util_col]].sum().reset_index()
+                    # Calculate Inactivity if Date is available
+                    if date_col:
+                        plot_df[date_col] = pd.to_datetime(plot_df[date_col], errors='coerce')
+                        date_df = plot_df.groupby(acc_col)[date_col].max().reset_index()
+                        date_df.rename(columns={date_col: 'Last_Transaction'}, inplace=True)
+                        account_df = account_df.merge(date_df, on=acc_col, how='left')
                         
-                        # Sort by Utilization to get top accounts
-                        top_accounts = agg_df.nlargest(10, util_col)
+                        # Assuming today is the max date in the dataset to simulate real-time accurately
+                        current_date = plot_df[date_col].max() if not pd.isna(plot_df[date_col].max()) else pd.Timestamp.now()
+                        account_df['Days_Inactive'] = (current_date - account_df['Last_Transaction']).dt.days
                         
-                        fig = go.Figure()
-                        fig.add_trace(go.Bar(
-                            x=top_accounts[acc_col],
-                            y=top_accounts[lim_col],
-                            name='Facility Limit',
-                            marker_color='#1f77b4'
-                        ))
-                        fig.add_trace(go.Bar(
-                            x=top_accounts[acc_col],
-                            y=top_accounts[util_col],
-                            name='Utilization',
-                            marker_color='#ff7f0e'
-                        ))
-                        
-                        fig.update_layout(
-                            barmode='group',
-                            xaxis_tickangle=-45,
-                            legend=dict(x=0.01, y=0.99, bgcolor='rgba(255,255,255,0.8)')
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("Limit and Utilization data not found for bar chart.")
-                
-                # Chart 2: Risk / Status Distribution
-                with c2:
-                    if "Status" in mapping:
-                        st.subheader("Account Status")
-                        stat_col = mapping["Status"][0]
-                        if "Account" in mapping:
-                            stat_df = plot_df.groupby(stat_col)[acc_col].nunique().reset_index()
-                            fig1 = px.pie(stat_df, names=stat_col, values=acc_col, hole=0.4)
-                        else:
-                            fig1 = px.pie(plot_df, names=stat_col, hole=0.4)
+                        def categorize_inactivity(days):
+                            if pd.isna(days): return 'Unknown'
+                            if days > 60: return 'Inactive (>60 days)'
+                            elif days > 30: return 'Dormant (30-60 days)'
+                            else: return 'Active (<30 days)'
                             
-                        # Improve donut chart layout
-                        fig1.update_traces(textposition='inside', textinfo='percent+label')
-                        fig1.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-                        st.plotly_chart(fig1, use_container_width=True)
-                    elif "DPD" in mapping:
-                        st.subheader("Overdue Status")
-                        dpd_col = mapping["DPD"][0]
-                        # Create buckets
-                        plot_df['DPD_Bucket'] = pd.cut(
-                            pd.to_numeric(plot_df[dpd_col], errors='coerce'), 
-                            bins=[-float('inf'), 0, 15, 30, float('inf')], 
-                            labels=['Current', '1-15 Days', '16-30 Days', '30+ Days']
-                        )
-                        dpd_df = plot_df['DPD_Bucket'].value_counts().reset_index()
-                        dpd_df.columns = ['Status', 'Count']
-                        fig1 = px.pie(dpd_df, names='Status', values='Count', hole=0.4)
-                        fig1.update_traces(textposition='inside', textinfo='percent+label')
-                        fig1.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-                        st.plotly_chart(fig1, use_container_width=True)
+                        account_df['Activity_Status'] = account_df['Days_Inactive'].apply(categorize_inactivity)
                     else:
-                        st.info("Status or DPD data not found for pie chart.")
+                        account_df['Last_Transaction'] = 'N/A'
+                        account_df['Activity_Status'] = 'Unknown'
+                        account_df['Days_Inactive'] = 0
+
+                    # Calculate "Action Required" Logic
+                    def needs_action(row):
+                        reasons = []
+                        if row.get('Utilization_Pct', 0) >= 80:
+                            reasons.append("High Utilization")
+                        if str(row.get(stat_col, '')).lower() in ['suspended', 'overdue']:
+                            reasons.append("Account Suspended/Overdue")
+                        if row.get('Days_Inactive', 0) > 60:
+                            reasons.append("Inactive")
+                        return " | ".join(reasons) if reasons else "Healthy"
+                    
+                    account_df['Action_Required'] = account_df.apply(needs_action, axis=1)
+                    
+                    # --- RENDER DASHBOARD ---
+                    
+                    # Top KPIs
+                    total_accounts = len(account_df)
+                    action_accounts = len(account_df[account_df['Action_Required'] != 'Healthy'])
+                    high_util_count = len(account_df[account_df['Utilization_Category'] == 'High (>80%)'])
+                    inactive_count = len(account_df[account_df['Activity_Status'] == 'Inactive (>60 days)'])
+
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("Total Accounts", total_accounts)
+                    k2.metric("Requires Action ⚠️", action_accounts, delta_color="inverse")
+                    k3.metric("High Utilization Accounts", high_util_count)
+                    k4.metric("Inactive Accounts (>60d)", inactive_count)
+                    
+                    st.divider()
+                    
+                    # Visualizations Row 1
+                    c1, c2 = st.columns(2)
+                    
+                    with c1:
+                        st.subheader("Utilization Categories")
+                        util_counts = account_df['Utilization_Category'].value_counts().reset_index()
+                        util_counts.columns = ['Category', 'Count']
+                        fig1 = px.pie(util_counts, names='Category', values='Count', hole=0.4, 
+                                      color='Category', 
+                                      color_discrete_map={'High (>80%)':'#d62728', 'Medium (30-80%)':'#ff7f0e', 'Low (<30%)':'#2ca02c'})
+                        fig1.update_traces(textposition='inside', textinfo='percent+label')
+                        fig1.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                        st.plotly_chart(fig1, use_container_width=True)
+                        
+                    with c2:
+                        st.subheader("Activity Status")
+                        act_counts = account_df['Activity_Status'].value_counts().reset_index()
+                        act_counts.columns = ['Status', 'Count']
+                        fig2 = px.pie(act_counts, names='Status', values='Count', hole=0.4,
+                                      color='Status',
+                                      color_discrete_map={'Inactive (>60 days)':'#7f7f7f', 'Dormant (30-60 days)':'#ffbb78', 'Active (<30 days)':'#98df8a', 'Unknown':'#c7c7c7'})
+                        fig2.update_traces(textposition='inside', textinfo='percent+label')
+                        fig2.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                        st.plotly_chart(fig2, use_container_width=True)
+
+                    st.divider()
+                    
+                    # Action Required Table
+                    st.subheader("⚠️ Accounts Requiring Action")
+                    action_table = account_df[account_df['Action_Required'] != 'Healthy']
+                    if not action_table.empty:
+                        display_cols = [acc_col, 'Total_Limit', 'Total_Utilization', 'Utilization_Pct', 'Action_Required', 'Activity_Status']
+                        if stat_col: display_cols.append(stat_col)
+                        st.dataframe(action_table[display_cols].sort_values(by='Utilization_Pct', ascending=False), use_container_width=True)
+                    else:
+                        st.success("All accounts are healthy! No immediate action required.")
+                        
+                else:
+                    st.warning("Insufficient data mapped to perform advanced logic. Need Account, Limit, and Utilization.")
 
         # TAB 2: Generalized "Any Data" Analysis
         with tab2:
