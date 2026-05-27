@@ -125,10 +125,11 @@ if uploaded_file:
                     account_df['Utilization_Pct'] = (account_df['Total_Utilization'] / account_df['Total_Limit_Safe']) * 100
                     account_df['Utilization_Pct'] = account_df['Utilization_Pct'].fillna(0)
                     
+                    # UPDATED RULES: Low < 20%, Medium 20-70%, High > 70%
                     def categorize_util(pct):
-                        if pct >= 80: return 'High (>80%)'
-                        elif pct >= 30: return 'Medium (30-80%)'
-                        else: return 'Low (<30%)'
+                        if pct > 70: return 'High (>70%)'
+                        elif pct >= 20: return 'Medium (20-70%)'
+                        else: return 'Low (<20%)'
                         
                     account_df['Utilization_Category'] = account_df['Utilization_Pct'].apply(categorize_util)
                     
@@ -163,15 +164,15 @@ if uploaded_file:
                         account_df['Activity_Status'] = 'Unknown'
                         account_df['Days_Inactive'] = 0
 
-                    # Calculate "Action Required" Logic
+                    # Calculate "Action Required" Logic based on new thresholds
                     def needs_action(row):
                         reasons = []
-                        if row.get('Utilization_Pct', 0) >= 80:
-                            reasons.append("High Utilization")
+                        if row.get('Utilization_Pct', 0) > 70:
+                            reasons.append("High Utilization (>70%)")
                         if str(row.get(stat_col, '')).lower() in ['suspended', 'overdue']:
                             reasons.append("Account Suspended/Overdue")
                         if row.get('Days_Inactive', 0) > 60:
-                            reasons.append("Inactive")
+                            reasons.append("Inactive (>60 days)")
                         return " | ".join(reasons) if reasons else "Healthy"
                     
                     account_df['Action_Required'] = account_df.apply(needs_action, axis=1)
@@ -181,7 +182,7 @@ if uploaded_file:
                     # Top KPIs
                     total_accounts = len(account_df)
                     action_accounts = len(account_df[account_df['Action_Required'] != 'Healthy'])
-                    high_util_count = len(account_df[account_df['Utilization_Category'] == 'High (>80%)'])
+                    high_util_count = len(account_df[account_df['Utilization_Category'] == 'High (>70%)'])
                     inactive_count = len(account_df[account_df['Activity_Status'] == 'Inactive (>60 days)'])
 
                     k1, k2, k3, k4 = st.columns(4)
@@ -201,7 +202,7 @@ if uploaded_file:
                         util_counts.columns = ['Category', 'Count']
                         fig1 = px.pie(util_counts, names='Category', values='Count', hole=0.4, 
                                       color='Category', 
-                                      color_discrete_map={'High (>80%)':'#d62728', 'Medium (30-80%)':'#ff7f0e', 'Low (<30%)':'#2ca02c'})
+                                      color_discrete_map={'High (>70%)':'#d62728', 'Medium (20-70%)':'#ff7f0e', 'Low (<20%)':'#2ca02c'})
                         fig1.update_traces(textposition='inside', textinfo='percent+label')
                         fig1.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
                         st.plotly_chart(fig1, use_container_width=True)
@@ -219,15 +220,44 @@ if uploaded_file:
 
                     st.divider()
                     
-                    # Action Required Table
-                    st.subheader("⚠️ Accounts Requiring Action")
-                    action_table = account_df[account_df['Action_Required'] != 'Healthy']
-                    if not action_table.empty:
-                        display_cols = [acc_col, 'Total_Limit', 'Total_Utilization', 'Utilization_Pct', 'Action_Required', 'Activity_Status']
+                    # --- INTERACTIVE ACCOUNT EXPLORER ---
+                    st.subheader("📂 Interactive Account Explorer")
+                    st.write("Use the filters below to view accounts in specific categories.")
+                    
+                    f1, f2, f3 = st.columns(3)
+                    
+                    with f1:
+                        util_options = ["All", "High (>70%)", "Medium (20-70%)", "Low (<20%)"]
+                        util_filter = st.selectbox("Filter by Utilization", util_options)
+                    
+                    with f2:
+                        act_options = ["All", "Active (<30 days)", "Dormant (30-60 days)", "Inactive (>60 days)", "Unknown"]
+                        act_filter = st.selectbox("Filter by Activity Status", act_options)
+                        
+                    with f3:
+                        action_filter = st.selectbox("Requires Action?", ["All", "Yes (Needs Action)", "No (Healthy)"], index=0)
+                    
+                    # Apply Filters
+                    filtered_df = account_df.copy()
+                    if util_filter != "All":
+                        filtered_df = filtered_df[filtered_df['Utilization_Category'] == util_filter]
+                    if act_filter != "All":
+                        filtered_df = filtered_df[filtered_df['Activity_Status'] == act_filter]
+                    if action_filter == "Yes (Needs Action)":
+                        filtered_df = filtered_df[filtered_df['Action_Required'] != 'Healthy']
+                    elif action_filter == "No (Healthy)":
+                        filtered_df = filtered_df[filtered_df['Action_Required'] == 'Healthy']
+
+                    if not filtered_df.empty:
+                        display_cols = [acc_col, 'Total_Limit', 'Total_Utilization', 'Utilization_Pct', 'Utilization_Category', 'Activity_Status', 'Action_Required']
                         if stat_col: display_cols.append(stat_col)
-                        st.dataframe(action_table[display_cols].sort_values(by='Utilization_Pct', ascending=False), use_container_width=True)
+                        
+                        # Format the percentage for better display
+                        display_df = filtered_df[display_cols].sort_values(by='Utilization_Pct', ascending=False)
+                        st.dataframe(display_df, use_container_width=True)
+                        st.caption(f"Showing {len(display_df)} accounts based on your selection.")
                     else:
-                        st.success("All accounts are healthy! No immediate action required.")
+                        st.info("No accounts match the selected categories.")
                         
                 else:
                     st.warning("Insufficient data mapped to perform advanced logic. Need Account, Limit, and Utilization.")
