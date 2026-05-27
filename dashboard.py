@@ -190,8 +190,8 @@ if selected_dataset and selected_dataset in st.session_state.datasets:
                 # Calculate "Action Required" Logic based on new thresholds
                 def needs_action(row):
                     reasons = []
-                    if row.get('Utilization_Pct', 0) > 70:
-                        reasons.append("High Utilization (>70%)")
+                    if row.get('Utilization_Pct', 0) < 20:
+                        reasons.append("Low Utilization (<20%)")
                     if str(row.get(stat_col, '')).lower() in ['suspended', 'overdue']:
                         reasons.append("Account Suspended/Overdue")
                     if row.get('Days_Inactive', 0) > 60:
@@ -205,13 +205,13 @@ if selected_dataset and selected_dataset in st.session_state.datasets:
                 # Top KPIs
                 total_accounts = len(account_df)
                 action_accounts = len(account_df[account_df['Action_Required'] != 'Healthy'])
-                high_util_count = len(account_df[account_df['Utilization_Category'] == 'High (>70%)'])
+                low_util_count = len(account_df[account_df['Utilization_Category'] == 'Low (<20%)'])
                 inactive_count = len(account_df[account_df['Activity_Status'] == 'Inactive (>60 days)'])
 
                 k1, k2, k3, k4 = st.columns(4)
                 k1.metric("Total Accounts", total_accounts)
                 k2.metric("Requires Action ⚠️", action_accounts, delta_color="inverse")
-                k3.metric("High Utilization Accounts", high_util_count)
+                k3.metric("Low Utilization Accounts", low_util_count)
                 k4.metric("Inactive Accounts (>60d)", inactive_count)
                 
                 st.divider()
@@ -230,7 +230,7 @@ if selected_dataset and selected_dataset in st.session_state.datasets:
                     
                     fig1 = px.bar(util_counts, x='Count', y='Category', orientation='h',
                                   color='Category', 
-                                  color_discrete_map={'High (>70%)':'#d62728', 'Medium (20-70%)':'#ff7f0e', 'Low (<20%)':'#2ca02c'},
+                                  color_discrete_map={'High (>70%)':'#2ca02c', 'Medium (20-70%)':'#ff7f0e', 'Low (<20%)':'#d62728'},
                                   text='Count')
                     fig1.update_traces(textposition='inside', marker_line_color='white', marker_line_width=1.5)
                     fig1.update_layout(showlegend=False, margin=dict(t=10, b=0, l=0, r=0), yaxis_title=None, xaxis_title="Number of Accounts")
