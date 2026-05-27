@@ -304,34 +304,100 @@ if selected_dataset and selected_dataset in st.session_state.datasets:
     # TAB 2: Generalized "Any Data" Analysis
     with tab2:
         st.markdown("### Smart Auto-Discovery")
-        st.write("This tab automatically analyzes **any** dataset, regardless of the column names. It finds the numeric and categorical columns and lets you build clean charts instantly.")
+        st.write("Automatically analyze and visualize the relationships in your dataset.")
         
         # Detect data types
         num_cols = df.select_dtypes(include='number').columns.tolist()
         cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
         
         if num_cols and cat_cols:
-            col_a, col_b = st.columns(2)
+            # Layout for controls
+            st.markdown("#### ⚙️ Data Configuration")
+            col_a, col_b, col_c = st.columns(3)
             with col_a:
                 cat_choice = st.selectbox("Group By (Category)", cat_cols)
             with col_b:
                 num_choice = st.selectbox("Measure (Metric)", num_cols)
-            
-            agg_method = st.radio("Aggregation", ["Sum", "Average", "Count"], horizontal=True)
-            
+            with col_c:
+                agg_method = st.selectbox("Aggregation Method", ["Sum", "Average", "Count", "Max", "Min"])
+                
+            # Layout for visual controls
+            v1, v2, v3 = st.columns(3)
+            with v1:
+                chart_type = st.selectbox("Chart Type", ["Bar Chart", "Donut Chart", "Line Chart", "Scatter Plot"])
+            with v2:
+                top_n = st.selectbox("Show Top N Results", [10, 15, 25, 50, "All"])
+            with v3:
+                sort_order = st.selectbox("Sort Order", ["Descending", "Ascending"])
+
+            # Perform Aggregation
             if agg_method == "Sum":
                 agg_df = df.groupby(cat_choice)[num_choice].sum().reset_index()
             elif agg_method == "Average":
                 agg_df = df.groupby(cat_choice)[num_choice].mean().reset_index()
-            else:
+            elif agg_method == "Count":
                 agg_df = df.groupby(cat_choice)[num_choice].count().reset_index()
+            elif agg_method == "Max":
+                agg_df = df.groupby(cat_choice)[num_choice].max().reset_index()
+            elif agg_method == "Min":
+                agg_df = df.groupby(cat_choice)[num_choice].min().reset_index()
+
+            # Dynamic Number Formatter
+            def format_num(num):
+                if pd.isna(num): return "0"
+                if abs(num) >= 1e9: return f"{num/1e9:.2f}B"
+                elif abs(num) >= 1e6: return f"{num/1e6:.2f}M"
+                elif abs(num) >= 1e3: return f"{num/1e3:.2f}K"
+                else: return f"{num:,.2f}"
+
+            # Calculate top level summary KPIs
+            total_metric = agg_df[num_choice].sum()
+            avg_metric = agg_df[num_choice].mean()
+            max_metric = agg_df[num_choice].max()
             
-            # Get Top 15 and plot
-            agg_df = agg_df.nlargest(15, num_choice).sort_values(by=num_choice, ascending=True)
+            st.divider()
             
-            st.subheader(f"Top 15 {cat_choice} by {agg_method} of {num_choice}")
-            fig_auto = px.bar(agg_df, x=num_choice, y=cat_choice, orientation='h', color=num_choice, color_continuous_scale="Blues")
+            # Show KPIs
+            k1, k2, k3 = st.columns(3)
+            k1.metric(f"Total {num_choice}", format_num(total_metric))
+            k2.metric(f"Avg {num_choice} per {cat_choice}", format_num(avg_metric))
+            k3.metric(f"Max {num_choice}", format_num(max_metric))
+            
+            st.divider()
+
+            # Title
+            title_text = f"Top {top_n} {cat_choice} by {agg_method} of {num_choice}" if top_n != "All" else f"All {cat_choice} by {agg_method} of {num_choice}"
+            st.subheader(title_text)
+
+            # Sorting and Limiting (always take top magnitude first for 'descending' logic)
+            if top_n != "All":
+                agg_df = agg_df.nlargest(top_n, num_choice)
+                
+            is_ascending = (sort_order == "Ascending")
+            agg_df = agg_df.sort_values(by=num_choice, ascending=is_ascending)
+
+            # Draw Chart
+            if chart_type == "Bar Chart":
+                fig_auto = px.bar(agg_df, x=cat_choice, y=num_choice, color=num_choice, color_continuous_scale="Blues", text_auto='.2s')
+                fig_auto.update_layout(xaxis_tickangle=-45)
+            elif chart_type == "Donut Chart":
+                fig_auto = px.pie(agg_df, names=cat_choice, values=num_choice, hole=0.4)
+                fig_auto.update_traces(textposition='inside', textinfo='percent+label')
+            elif chart_type == "Line Chart":
+                fig_auto = px.line(agg_df, x=cat_choice, y=num_choice, markers=True)
+                fig_auto.update_layout(xaxis_tickangle=-45)
+            elif chart_type == "Scatter Plot":
+                # Ensure size doesn't fail on negative values (e.g. negative DPD)
+                safe_size = agg_df[num_choice].apply(lambda x: max(x, 0))
+                fig_auto = px.scatter(agg_df, x=cat_choice, y=num_choice, size=safe_size, color=num_choice, color_continuous_scale="Blues")
+                fig_auto.update_layout(xaxis_tickangle=-45)
+                
             st.plotly_chart(fig_auto, use_container_width=True)
+            
+            with st.expander("Show Data Table"):
+                # Use st.dataframe with pandas styling for formatting
+                st.dataframe(agg_df.style.format({num_choice: "{:,.2f}"}), use_container_width=True)
+
         else:
             st.info("The dataset needs at least one numeric and one text column to auto-generate charts.")
 
