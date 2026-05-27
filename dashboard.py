@@ -205,7 +205,8 @@ if uploaded_file:
                                       color_discrete_map={'High (>70%)':'#d62728', 'Medium (20-70%)':'#ff7f0e', 'Low (<20%)':'#2ca02c'})
                         fig1.update_traces(textposition='inside', textinfo='percent+label')
                         fig1.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-                        st.plotly_chart(fig1, use_container_width=True)
+                        # Make pie chart interactive
+                        util_event = st.plotly_chart(fig1, use_container_width=True, on_select="rerun", selection_mode="points", key="util_pie")
                         
                     with c2:
                         st.subheader("Activity Status")
@@ -216,36 +217,41 @@ if uploaded_file:
                                       color_discrete_map={'Inactive (>60 days)':'#7f7f7f', 'Dormant (30-60 days)':'#ffbb78', 'Active (<30 days)':'#98df8a', 'Unknown':'#c7c7c7'})
                         fig2.update_traces(textposition='inside', textinfo='percent+label')
                         fig2.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-                        st.plotly_chart(fig2, use_container_width=True)
+                        # Make pie chart interactive
+                        act_event = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", selection_mode="points", key="act_pie")
 
                     st.divider()
                     
                     # --- INTERACTIVE ACCOUNT EXPLORER ---
                     st.subheader("📂 Interactive Account Explorer")
-                    st.write("Use the filters below to view accounts in specific categories.")
+                    st.write("Click on any slice in the pie charts above to filter the accounts below. If no slice is selected, all accounts are shown.")
                     
-                    f1, f2, f3 = st.columns(3)
-                    
-                    with f1:
-                        util_options = ["All", "High (>70%)", "Medium (20-70%)", "Low (<20%)"]
-                        util_filter = st.selectbox("Filter by Utilization", util_options)
-                    
-                    with f2:
-                        act_options = ["All", "Active (<30 days)", "Dormant (30-60 days)", "Inactive (>60 days)", "Unknown"]
-                        act_filter = st.selectbox("Filter by Activity Status", act_options)
+                    # Extract selections from events
+                    selected_utils = []
+                    if util_event and "selection" in util_event and "points" in util_event["selection"]:
+                        # Plotly pie chart selections return 'label' for the slice name
+                        selected_utils = [p.get("label", "") for p in util_event["selection"]["points"]]
                         
-                    with f3:
-                        action_filter = st.selectbox("Requires Action?", ["All", "Yes (Needs Action)", "No (Healthy)"], index=0)
+                    selected_acts = []
+                    if act_event and "selection" in act_event and "points" in act_event["selection"]:
+                        selected_acts = [p.get("label", "") for p in act_event["selection"]["points"]]
+                        
+                    # Also keep the "Requires Action" toggle just in case
+                    action_filter = st.selectbox("Quick Filter:", ["Show All Accounts", "⚠️ Requires Action Only", "✅ Healthy Only"], index=0)
                     
                     # Apply Filters
                     filtered_df = account_df.copy()
-                    if util_filter != "All":
-                        filtered_df = filtered_df[filtered_df['Utilization_Category'] == util_filter]
-                    if act_filter != "All":
-                        filtered_df = filtered_df[filtered_df['Activity_Status'] == act_filter]
-                    if action_filter == "Yes (Needs Action)":
+                    
+                    # Apply pie chart filters
+                    if selected_utils:
+                        filtered_df = filtered_df[filtered_df['Utilization_Category'].isin(selected_utils)]
+                    if selected_acts:
+                        filtered_df = filtered_df[filtered_df['Activity_Status'].isin(selected_acts)]
+                        
+                    # Apply action filter
+                    if action_filter == "⚠️ Requires Action Only":
                         filtered_df = filtered_df[filtered_df['Action_Required'] != 'Healthy']
-                    elif action_filter == "No (Healthy)":
+                    elif action_filter == "✅ Healthy Only":
                         filtered_df = filtered_df[filtered_df['Action_Required'] == 'Healthy']
 
                     if not filtered_df.empty:
