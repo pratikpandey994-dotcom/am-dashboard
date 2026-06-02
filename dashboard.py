@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 
 st.set_page_config(page_title="AM Portfolio Dashboard", layout="wide", page_icon="📊")
@@ -22,6 +22,57 @@ REQUIRED_COLS = [
 ]
 
 # --- UTILITY FUNCTIONS ---
+def generate_sample_data():
+    """Generates a realistic dummy dataset for immediate testing."""
+    np.random.seed(42)
+    num_rows = 150
+    now = pd.Timestamp.now()
+    
+    buyers = [f"Buyer Corp {i}" for i in range(1, 51)]
+    companies = [f"Supplier Inc {i}" for i in range(1, 21)]
+    ams = ["Alice Johnson", "Bob Smith", "Charlie Davis", "Diana Prince", "Unassigned"]
+    
+    data = []
+    for _ in range(num_rows):
+        buyer = np.random.choice(buyers)
+        am = np.random.choice(ams)
+        fac_size = np.random.uniform(50000, 2000000)
+        out_bal = fac_size * np.random.uniform(0.1, 1.1) # Sometimes over 100%
+        
+        # 20% chance of being an old disbursement (>180 days)
+        if np.random.random() < 0.2:
+            last_disb = now - timedelta(days=np.random.randint(181, 300))
+        else:
+            last_disb = now - timedelta(days=np.random.randint(5, 170))
+            
+        # 30% chance of invoice in current month
+        if np.random.random() < 0.3:
+            due_date = now + timedelta(days=np.random.randint(-15, 15))
+        else:
+            due_date = now + timedelta(days=np.random.randint(30, 90))
+            
+        # 50% chance of having a settlement date
+        settle_date = due_date if np.random.random() < 0.5 else pd.NaT
+        
+        # Repayment logic
+        repay = out_bal * np.random.uniform(0.1, 0.5) if pd.notna(settle_date) else 0
+        
+        data.append({
+            'Buyer': buyer,
+            'Company': np.random.choice(companies),
+            'Account_Status': np.random.choice(VALID_STATUSES),
+            'AM Names': am,
+            'AM': am,
+            'Facility Size': fac_size,
+            'Outstanding Balance': out_bal,
+            'Last Disbursed Date': last_disb,
+            'Due Date of Invoice': due_date,
+            'Settlement Date': settle_date,
+            'Payment Total USD': repay
+        })
+        
+    return pd.DataFrame(data)
+
 @st.cache_data
 def load_and_merge_data(single_file, master_file, view1_file, view2_file):
     try:
@@ -98,19 +149,42 @@ def process_data(df):
     df = pd.merge(df, dedup_sum, on=['Buyer_Clean', 'Settle_Date_Clean'], how='left')
     df['Deduplicated Repayment'] = df['Deduplicated Repayment'].fillna(0)
     
+    # Calculate Post-Repayment flags globally for the master table
+    def get_global_flags(row):
+        flags = []
+        if pd.isna(row['Settlement Date']) and row['In Current Month']: 
+            flags.append("Collect Amount (Missing Settle Date)")
+        if row['Facility Size'] > 0 and row['In Current Month']:
+            post_util = (row['Outstanding Balance'] - row['Deduplicated Repayment']) / row['Facility Size']
+            if post_util < 0.5: flags.append("Low Util Post-Repay")
+        return " | ".join(flags) if flags else "None"
+        
+    df['Invoice Flags'] = df.apply(get_global_flags, axis=1)
+    
     return df
 
 # --- UI LAYOUT ---
-st.title("📊 AM Portfolio Intelligence")
-st.markdown("Advanced visualization and risk analysis based on core portfolio logic.")
+st.title("📊 Unified AM Portfolio Dashboard")
+
+# Initialize Session State
+if 'master_df' not in st.session_state:
+    st.session_state.master_df = None
 
 # Sidebar - Data Upload
 with st.sidebar:
-    st.header("Data Upload")
-    upload_mode = st.radio("Upload Mode", ["Single Combined Sheet", "Three Separate Sheets"])
+    st.header("📂 Data Source")
+    
+    if st.button("Load Sample Data", type="primary", use_container_width=True):
+        raw_sample = generate_sample_data()
+        st.session_state.master_df = process_data(raw_sample)
+        st.success("Sample data loaded!")
+        st.rerun()
+        
+    st.divider()
+    
+    upload_mode = st.radio("Upload Own Files:", ["Single Combined Sheet", "Three Separate Sheets"])
     
     single_file = master_file = view1_file = view2_file = None
-    
     if upload_mode == "Single Combined Sheet":
         single_file = st.file_uploader("Upload Combined Data (Excel/CSV)", type=["xlsx", "csv"])
     else:
@@ -118,23 +192,20 @@ with st.sidebar:
         view1_file = st.file_uploader("2. View 1", type=["xlsx", "csv"])
         view2_file = st.file_uploader("3. View 2", type=["xlsx", "csv"])
         
-    process_btn = st.button("Process Data", type="primary", use_container_width=True)
+    if st.button("Process Files", use_container_width=True):
+        with st.spinner("Processing logic..."):
+            df = load_and_merge_data(single_file, master_file, view1_file, view2_file)
+            if df is not None:
+                st.session_state.master_df = df
+                st.success("Data successfully processed!")
+                st.rerun()
 
-if 'master_df' not in st.session_state:
-    st.session_state.master_df = None
-
-if process_btn:
-    with st.spinner("Processing logic..."):
-        df = load_and_merge_data(single_file, master_file, view1_file, view2_file)
-        if df is not None:
-            st.session_state.master_df = df
-            st.success("Data successfully processed!")
-
+# --- MAIN DASHBOARD AREA ---
 if st.session_state.master_df is not None:
     df = st.session_state.master_df
     
-    # Global Filters
-    st.markdown("### Global Portfolio Filters")
+    # 1. Global Filters (Always render perfectly if data exists)
+    st.markdown("### 🎛️ Global Portfolio Filters")
     col1, col2, col3 = st.columns(3)
     with col1:
         am_options = ["All AMs"] + sorted(list(df['AM Names'].dropna().unique()))
@@ -145,6 +216,7 @@ if st.session_state.master_df is not None:
     with col3:
         search_query = st.text_input("Search Company or Buyer", placeholder="Type to search...")
         
+    # Apply Filters
     filtered_df = df.copy()
     if selected_am != "All AMs": filtered_df = filtered_df[filtered_df['AM Names'] == selected_am]
     if selected_status != "All Statuses": filtered_df = filtered_df[filtered_df['Account_Status'] == selected_status]
@@ -153,195 +225,121 @@ if st.session_state.master_df is not None:
         mask = filtered_df['Company'].str.lower().str.contains(query, na=False) | filtered_df['Buyer'].str.lower().str.contains(query, na=False)
         filtered_df = filtered_df[mask]
         
+    # Unique accounts base for structural calculations
+    unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
+    
     st.divider()
+
+    # 2. Executive KPIs (Top Row)
+    tot_fac = unique_accts['Facility Size'].sum()
+    tot_out = unique_accts['Outstanding Balance'].sum()
+    glob_util = (tot_out / tot_fac * 100) if tot_fac > 0 else 0
     
-    # TABS
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🌍 Executive Overview", 
-        "⚠️ Risk & Exposure", 
-        "💵 Cashflow & Collections", 
-        "👑 AM Performance"
-    ])
+    # Repayment dedup sum
+    month_df = filtered_df[filtered_df['In Current Month'] == True].copy()
+    unique_repayments = month_df.drop_duplicates(subset=['Buyer_Clean', 'Settle_Date_Clean'])
+    tot_repay = unique_repayments['Deduplicated Repayment'].sum()
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total Facility Size", f"${tot_fac:,.0f}")
+    k2.metric("Total Outstanding", f"${tot_out:,.0f}")
+    k3.metric("Global Average Utilisation", f"{glob_util:.1f}%")
+    k4.metric("Collections (Present Month)", f"${tot_repay:,.0f}")
     
-    # --- TAB 1: EXECUTIVE OVERVIEW ---
-    with tab1:
-        st.subheader("Global Portfolio Structure")
-        
-        # Unique accounts for treemap to avoid massive duplication
-        unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
-        
-        tot_fac = unique_accts['Facility Size'].sum()
-        tot_out = unique_accts['Outstanding Balance'].sum()
-        glob_util = (tot_out / tot_fac * 100) if tot_fac > 0 else 0
-        
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Total Facility Size", f"${tot_fac:,.0f}")
-        k2.metric("Total Outstanding", f"${tot_out:,.0f}")
-        k3.metric("Global Average Utilisation", f"{glob_util:.1f}%")
-        
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.markdown("#### Portfolio Concentration (Status ➔ AM ➔ Buyer)")
-            # Treemap
-            fig_tree = px.treemap(
-                unique_accts, 
-                path=[px.Constant("All Portfolio"), 'Account_Status', 'AM Names', 'Buyer_Clean'], 
-                values='Facility Size',
-                color='Utilisation %',
-                color_continuous_scale='RdYlGn_r', # Red is high utilization, Green is low
-                range_color=[0, 100]
-            )
-            fig_tree.update_traces(root_color="lightgrey")
-            fig_tree.update_layout(margin = dict(t=20, l=20, r=20, b=20))
-            st.plotly_chart(fig_tree, use_container_width=True)
-            
-        with c2:
-            st.markdown("#### Global Utilisation Gauge")
-            fig_gauge = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = glob_util,
-                title = {'text': "Utilisation %"},
-                gauge = {
-                    'axis': {'range': [None, 100]},
-                    'bar': {'color': "darkblue"},
-                    'steps': [
-                        {'range': [0, 50], 'color': "lightgreen"},
-                        {'range': [50, 70], 'color': "gold"},
-                        {'range': [70, 100], 'color': "salmon"}
-                    ]
-                }
-            ))
-            st.plotly_chart(fig_gauge, use_container_width=True)
+    st.divider()
 
-        with st.expander("View Raw Masterdata"):
-            st.dataframe(unique_accts[['Buyer', 'Company', 'Account_Status', 'AM Names', 'Facility Size', 'Outstanding Balance', 'Utilisation %']], hide_index=True)
+    # 3. Portfolio & Risk (Middle Row 1)
+    c1, c2 = st.columns([6, 4])
+    with c1:
+        st.markdown("#### 🌍 Portfolio Concentration")
+        fig_tree = px.treemap(
+            unique_accts, 
+            path=[px.Constant("All Portfolio"), 'Account_Status', 'AM Names', 'Buyer_Clean'], 
+            values='Facility Size',
+            color='Utilisation %',
+            color_continuous_scale='RdYlGn_r',
+            range_color=[0, 100],
+            title="Sized by Facility, Colored by Utilisation"
+        )
+        fig_tree.update_traces(root_color="lightgrey")
+        fig_tree.update_layout(margin = dict(t=30, l=10, r=10, b=10))
+        st.plotly_chart(fig_tree, use_container_width=True)
+        
+    with c2:
+        st.markdown("#### ⚠️ Risk Matrix (Facility vs Outstanding)")
+        max_val = max(unique_accts['Facility Size'].max(), unique_accts['Outstanding Balance'].max())
+        fig_scatter = px.scatter(
+            unique_accts, x="Facility Size", y="Outstanding Balance", 
+            color="180-Day Alert", 
+            color_discrete_map={"YES": "red", "NO": "green"},
+            hover_name="Buyer_Clean", hover_data=["AM Names", "Utilisation %"],
+            title="Red dots indicate 180-Day Disbursement Alerts"
+        )
+        fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="black", dash="dash"))
+        fig_scatter.update_layout(margin = dict(t=30, l=10, r=10, b=10))
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # --- TAB 2: RISK & EXPOSURE ---
-    with tab2:
-        st.subheader("Risk Identification & 180-Day Alerts")
-        st.write("Accounts heavily utilized or flagged by the 180-Day disbursement rule.")
-        
-        unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("#### Facility vs Outstanding (Risk Matrix)")
-            # Scatter Plot
-            # Create a line showing 100% utilisation (X=Y)
-            max_val = max(unique_accts['Facility Size'].max(), unique_accts['Outstanding Balance'].max())
-            fig_scatter = px.scatter(
-                unique_accts, x="Facility Size", y="Outstanding Balance", 
-                color="180-Day Alert", 
-                color_discrete_map={"YES": "red", "NO": "green"},
-                hover_name="Buyer_Clean", hover_data=["AM Names", "Utilisation %"]
-            )
-            # Add 100% utilisation reference line
-            fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="black", dash="dash"))
-            st.plotly_chart(fig_scatter, use_container_width=True)
-            
-        with c2:
-            st.markdown("#### Risk Profile by AM (Utilisation Categories)")
-            # Stacked Bar
-            risk_counts = unique_accts.groupby(['AM Names', 'Utilisation Category']).size().reset_index(name='Count')
-            fig_bar = px.bar(
-                risk_counts, x="AM Names", y="Count", color="Utilisation Category",
-                color_discrete_map={"High": "#e53e3e", "Medium": "#dd6b20", "Low": "#38a169"},
-                barmode='stack'
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+    st.divider()
 
-        with st.expander("View Accounts Requiring Attention (180-Day Alert or High Utilisation)"):
-            risk_df = unique_accts[(unique_accts['180-Day Alert'] == 'YES') | (unique_accts['Utilisation Category'] == 'High')]
-            st.dataframe(risk_df[['Buyer', 'AM Names', '180-Day Alert', 'Utilisation %', 'Outstanding Balance', 'Facility Size']], hide_index=True)
-
-    # --- TAB 3: CASHFLOW & COLLECTIONS ---
-    with tab3:
-        st.subheader("Invoices & Deduplicated Repayments (Current Month)")
-        
-        # Apply strict present month rule
-        month_df = filtered_df[filtered_df['In Current Month'] == True].copy()
-        unique_repayments = month_df.drop_duplicates(subset=['Buyer_Clean', 'Settle_Date_Clean']).copy()
-        
-        tot_repay = unique_repayments['Deduplicated Repayment'].sum()
-        st.metric("Total Deduplicated Repayments (Current Month)", f"${tot_repay:,.2f}")
-        
-        # Time-Series Bar Chart for Collections
-        # Group by Settlement Date
+    # 4. Trends & Leaderboard (Middle Row 2)
+    c3, c4 = st.columns(2)
+    with c3:
+        st.markdown("#### 💵 Daily Collections Trend (Present Month)")
         if not unique_repayments.empty:
             timeline_df = unique_repayments.groupby('Settle_Date_Clean')['Deduplicated Repayment'].sum().reset_index()
-            # Filter out 'None' dates if any
             timeline_df = timeline_df[timeline_df['Settle_Date_Clean'] != 'None']
-            
             fig_timeline = px.bar(
                 timeline_df, x='Settle_Date_Clean', y='Deduplicated Repayment',
-                title="Daily Collections Trend (Present Month)",
                 labels={'Settle_Date_Clean': 'Settlement Date', 'Deduplicated Repayment': 'Amount Collected'}
             )
-            fig_timeline.update_layout(xaxis_tickangle=-45)
+            fig_timeline.update_layout(margin = dict(t=10, l=10, r=10, b=10))
             st.plotly_chart(fig_timeline, use_container_width=True)
-            
-        with st.expander("View Invoice & Repayment Data"):
-            def get_invoice_flags(row):
-                flags = []
-                if pd.isna(row['Settlement Date']): flags.append("Collect Amount")
-                if row['Facility Size'] > 0:
-                    post_util = (row['Outstanding Balance'] - row['Deduplicated Repayment']) / row['Facility Size']
-                    if post_util < 0.5: flags.append("Low Util Post-Repay")
-                return ", ".join(flags)
-                
-            month_df['Flags'] = month_df.apply(get_invoice_flags, axis=1)
-            display_month = month_df[['Buyer', 'Company', 'AM Names', 'Due Date of Invoice', 'Settlement Date', 'Deduplicated Repayment', 'Flags']].drop_duplicates()
-            st.dataframe(display_month, use_container_width=True, hide_index=True)
+        else:
+            st.info("No settlements found for the current calendar month.")
 
-    # --- TAB 4: AM PERFORMANCE ---
-    with tab4:
-        st.subheader("Account Manager Performance Leaderboard")
-        st.write("Comparing total portfolio size managed vs the average utilisation of those portfolios.")
-        
-        unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
-        
+    with c4:
+        st.markdown("#### 👑 AM Performance Leaderboard")
         am_perf = unique_accts.groupby('AM Names').agg(
             Total_Facility=('Facility Size', 'sum'),
-            Avg_Utilisation=('Utilisation %', 'mean'),
-            Account_Count=('Buyer_Clean', 'count')
-        ).reset_index()
+            Avg_Utilisation=('Utilisation %', 'mean')
+        ).reset_index().sort_values('Total_Facility', ascending=False)
         
-        am_perf = am_perf.sort_values('Total_Facility', ascending=False)
-        
-        # Combo Chart using Graph Objects
         fig_combo = go.Figure()
-        
-        # Bar chart for Facility Size
-        fig_combo.add_trace(go.Bar(
-            x=am_perf['AM Names'],
-            y=am_perf['Total_Facility'],
-            name="Total Facility Size ($)",
-            marker_color='teal',
-            yaxis='y1'
-        ))
-        
-        # Line chart for Avg Utilisation
-        fig_combo.add_trace(go.Scatter(
-            x=am_perf['AM Names'],
-            y=am_perf['Avg_Utilisation'],
-            name="Avg Utilisation (%)",
-            mode='lines+markers',
-            marker=dict(color='orange', size=10),
-            line=dict(width=3),
-            yaxis='y2'
-        ))
-        
-        # Layout for dual y-axis
+        fig_combo.add_trace(go.Bar(x=am_perf['AM Names'], y=am_perf['Total_Facility'], name="Facility Size ($)", marker_color='teal', yaxis='y1'))
+        fig_combo.add_trace(go.Scatter(x=am_perf['AM Names'], y=am_perf['Avg_Utilisation'], name="Avg Utilisation (%)", mode='lines+markers', marker=dict(color='orange', size=8), line=dict(width=3), yaxis='y2'))
         fig_combo.update_layout(
-            title="Portfolio Size vs Utilisation Rate",
             yaxis=dict(title="Facility Size ($)", side='left'),
             yaxis2=dict(title="Avg Utilisation (%)", overlaying='y', side='right', range=[0, 100]),
-            legend=dict(x=1.1, y=1)
+            legend=dict(x=1.1, y=1),
+            margin = dict(t=10, l=10, r=10, b=10)
         )
         st.plotly_chart(fig_combo, use_container_width=True)
+
+    st.divider()
+
+    # 5. Master Data Table (Bottom Row)
+    st.markdown("### 📋 Unified Master Data")
+    st.write("All flags and logics (180-Day, Present Month, Low Utilisation) are pre-calculated and merged into this unified table.")
+    
+    display_cols = [
+        'Company', 'Buyer', 'Account_Status', 'AM Names', 
+        'Outstanding Balance', 'Facility Size', 'Utilisation %', 'Utilisation Category',
+        '180-Day Alert', 'Due Date of Invoice', 'Settlement Date', 
+        'Deduplicated Repayment', 'Invoice Flags'
+    ]
+    
+    # Format dates nicely for the table if possible
+    table_df = filtered_df[display_cols].copy()
+    for date_col in ['Due Date of Invoice', 'Settlement Date']:
+        table_df[date_col] = table_df[date_col].dt.strftime('%Y-%m-%d').fillna('')
         
-        with st.expander("View AM Performance Data"):
-            st.dataframe(am_perf, use_container_width=True, hide_index=True)
+    st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 else:
-    st.info("👈 Please upload your data files in the sidebar and click 'Process Data'.")
+    # Beautiful Empty State
+    st.markdown("""
+        <div style="text-align: center; padding: 50px;">
+            <h1 style="color: #008080;">Welcome to AM Portfolio Intelligence</h1>
+            <p style="color: #666; font-size: 18px;">To see the dashboard in action, please <b>Load Sample Data</b> or <b>Upload your files</b> using the sidebar on the left.</p>
+        </div>
+    """, unsafe_allow_html=True)
