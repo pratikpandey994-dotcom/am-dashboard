@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AM Portfolio Dashboard</title>
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&f[]=cabinet-grotesk@500,700,800&display=swap" rel="stylesheet">
+    <style>
+        /* CSS Variables - Nexus Design System */
+        :root {
+            --bg-body: #f4f3ef; /* Warm beige */
+            --bg-surface: #ffffff;
+            --bg-surface-hover: #f9f8f6;
+            --text-main: #2d3748;
+            --text-muted: #718096;
+            --primary: #008080; /* Teal primary accent */
+            --primary-light: #e0f2f1;
+            --border-color: #e2e8f0;
+            --danger: #e53e3e;
+            --warning: #dd6b20;
+            --success: #38a169;
+            --radius-md: 8px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --font-body: 'Satoshi', sans-serif;
+            --font-heading: 'Cabinet Grotesk', sans-serif;
+        }
+
+        [data-theme="dark"] {
+            --bg-body: #1a202c;
+            --bg-surface: #2d3748; /* Dark charcoal */
+            --bg-surface-hover: #4a5568;
+            --text-main: #f7fafc;
+            --text-muted: #a0aec0;
+            --primary: #4fd1c5;
+            --primary-light: #234e52;
+            --border-color: #4a5568;
+            --danger: #fc8181;
+            --warning: #fbd38d;
+            --success: #68d391;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            transition: background-color 0.3s, color 0.3s;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            font-family: var(--font-heading);
+            font-weight: 700;
+        }
+
+        .num { font-variant-numeric: tabular-nums; }
+
+        .app-container {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 250px;
+            background-color: var(--bg-surface);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.3s;
+            z-index: 10;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar { width: 60px; }
+            .sidebar .nav-label { display: none; }
+            .sidebar-header h2 { display: none; }
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-header svg {
+            width: 32px; height: 32px; fill: var(--primary);
+        }
+
+        .nav-links { list-style: none; padding: 10px 0; flex: 1; }
+
+        .nav-link {
+            padding: 12px 20px;
+            display: flex; align-items: center; gap: 12px;
+            cursor: pointer; color: var(--text-muted);
+            transition: all 0.2s; border-left: 3px solid transparent;
+        }
+
+        .nav-link:hover {
+            background-color: var(--primary-light); color: var(--primary);
+        }
+
+        .nav-link.active {
+            background-color: var(--primary-light); color: var(--primary);
+            border-left-color: var(--primary); font-weight: 500;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1; display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        .topbar {
+            height: 70px; background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border-color);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px;
+        }
+
+        .global-filters { display: flex; gap: 15px; align-items: center; flex-wrap: wrap;}
+        .filter-group { display: flex; align-items: center; gap: 8px; }
+
+        select, input[type="text"] {
+            background-color: var(--bg-surface); color: var(--text-main);
+            border: 1px solid var(--border-color); padding: 6px 12px;
+            border-radius: var(--radius-md); font-family: var(--font-body);
+            font-size: 14px; outline: none;
+        }
+
+        select:focus, input[type="text"]:focus {
+            border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light);
+        }
+
+        .btn {
+            padding: 8px 16px; border-radius: var(--radius-md); border: none;
+            cursor: pointer; font-family: var(--font-body); font-weight: 500;
+            transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-primary:hover { background-color: #006666; }
+        .btn-outline { background-color: transparent; border: 1px solid var(--border-color); color: var(--text-main); }
+        .btn-outline:hover { background-color: var(--bg-body); }
+
+        .theme-toggle {
+            background: none; border: none; color: var(--text-main);
+            cursor: pointer; font-size: 20px;
+        }
+
+        .content-area { flex: 1; padding: 24px; overflow-y: auto; }
+
+        /* Upload Screen */
+        #upload-view {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; height: 100vh; background-color: var(--bg-body); padding: 20px;
+        }
+
+        .upload-card {
+            background-color: var(--bg-surface); padding: 40px;
+            border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+            text-align: center; max-width: 600px; width: 100%;
+        }
+
+        .upload-options { display: flex; gap: 20px; margin-top: 30px; justify-content: center; flex-wrap: wrap;}
+        .upload-box {
+            border: 2px dashed var(--border-color); padding: 30px 20px;
+            border-radius: var(--radius-md); cursor: pointer; flex: 1;
+            transition: border-color 0.2s; position: relative; min-width: 220px;
+        }
+        .upload-box:hover { border-color: var(--primary); }
+        .upload-box input[type="file"] {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0; cursor: pointer;
+        }
+
+        .warning-banner {
+            background-color: var(--warning); color: white; padding: 10px;
+            border-radius: var(--radius-md); margin-bottom: 15px; display: none;
+        }
+
+        /* Dashboard Components */
+        .tab-content { display: none; animation: fadeIn 0.3s ease-in-out; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 24px; }
+        .kpi-card {
+            background-color: var(--bg-surface); padding: 20px; border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm); border: 1px solid var(--border-color);
+        }
+        .kpi-title { color: var(--text-muted); font-size: 14px; margin-bottom: 8px; }
+        .kpi-value { font-size: 24px; font-family: var(--font-heading); color: var(--text-main); }
+
+        .chart-container {
+            background-color: var(--bg-surface); padding: 20px; border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm); border: 1px solid var(--border-color);
+            margin-bottom: 24px; position: relative;
+        }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        
+        .table-container {
+            background-color: var(--bg-surface); border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); overflow: hidden;
+        }
+        .table-wrapper { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 12px 20px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+        th {
+            background-color: var(--bg-body); color: var(--text-muted); font-weight: 500;
+            font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;
+            cursor: pointer; user-select: none;
+        }
+        th:hover { color: var(--text-main); }
+        tr:hover { background-color: var(--bg-surface-hover); }
+
+        .pagination {
+            padding: 15px 20px; display: flex; justify-content: space-between;
+            align-items: center; border-top: 1px solid var(--border-color);
+        }
+
+        /* Badges */
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+        .badge-high { background-color: rgba(229, 62, 62, 0.1); color: var(--danger); }
+        .badge-medium { background-color: rgba(221, 107, 32, 0.1); color: var(--warning); }
+        .badge-low { background-color: rgba(56, 161, 105, 0.1); color: var(--success); }
+        .badge-amber { background-color: var(--warning); color: white; }
+
+        .loader {
+            border: 4px solid var(--border-color); border-top: 4px solid var(--primary);
+            border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center;
+            color: white; z-index: 1000; flex-direction: column;
+        }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        @media (max-width: 1024px) { .grid-2 { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="loader"></div>
+        <h3 style="margin-top: 15px; font-family: var(--font-heading);">Processing Data...</h3>
+    </div>
+
+    <!-- Upload View -->
+    <div id="upload-view">
+        <div class="upload-card">
+            <svg style="width: 48px; height: 48px; fill: var(--primary); margin-bottom: 20px;" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 9h-2V7h-2v5H6l4 4 4-4h-2z"/></svg>
+            <h2>AM Portfolio Dashboard</h2>
+            <p style="color: var(--text-muted); margin-top: 10px;">Upload your Account Management data to get started.</p>
+            
+            <div id="warning-banner" class="warning-banner"></div>
+
+            <div class="upload-options">
+                <div class="upload-box">
+                    <input type="file" id="file-single" accept=".xlsx,.csv" onchange="handleSingleUpload(event)">
+                    <h4>Single Combined Sheet</h4>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 5px;">Upload one file containing all required columns.</p>
+                </div>
+                <div class="upload-box">
+                    <h4 style="margin-bottom:10px;">Three Separate Sheets</h4>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        <input type="file" id="file-master" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
+                        <label style="font-size:12px;">Masterdata</label>
+                        
+                        <input type="file" id="file-view1" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
+                        <label style="font-size:12px;">View 1</label>
+                        
+                        <input type="file" id="file-view2" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
+                        <label style="font-size:12px;">View 2</label>
+                        
+                        <button class="btn btn-primary" style="margin-top:10px; width:100%; justify-content:center; position:relative; z-index:3;" onclick="handleMultiUpload()">Process Files</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboard-view" style="display: none;" class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+                <h2>Nexus AM</h2>
+            </div>
+            <ul class="nav-links">
+                <li class="nav-link active" onclick="switchTab('tab-overview', this)">
+                    <span>📊</span> <span class="nav-label">Overview</span>
+                </li>
+                <li class="nav-link" onclick="switchTab('tab-invoices', this)">
+                    <span>💵</span> <span class="nav-label">Invoices & Repayments</span>
+                </li>
+                <li class="nav-link" onclick="switchTab('tab-inactive', this)">
+                    <span>💤</span> <span class="nav-label">Workable Inactive</span>
+                </li>
+                <li class="nav-link" onclick="switchTab('tab-top15', this)">
+                    <span>🏆</span> <span class="nav-label">Top 15 Accounts</span>
+                </li>
+                <li class="nav-link" onclick="switchTab('tab-leadership', this)">
+                    <span>👑</span> <span class="nav-label">Leadership Direct</span>
+                </li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Topbar (Global Filters) -->
+            <header class="topbar">
+                <div class="global-filters">
+                    <div class="filter-group">
+                        <label style="font-size: 12px; color: var(--text-muted);">AM Name</label>
+                        <select id="global-am-filter" onchange="applyFilters()">
+                            <option value="All">All AMs</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label style="font-size: 12px; color: var(--text-muted);">Status</label>
+                        <select id="global-status-filter" onchange="applyFilters()">
+                            <option value="All">All Statuses</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <input type="text" id="global-search" placeholder="Search Company or Buyer..." onkeyup="applyFilters()">
+                    </div>
+                </div>
+                <div>
+                    <button class="theme-toggle" onclick="toggleTheme()">🌓</button>
+                </div>
+            </header>
+
+            <div class="content-area">
+                
+                <!-- Tab 1: Overview -->
+                <div id="tab-overview" class="tab-content active">
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3>Overview / Masterdata</h3>
+                            <button class="btn btn-outline" onclick="exportTableToCSV('table-overview', 'Overview_Data.csv')">Export CSV</button>
+                        </div>
+                        <div class="table-container">
+                            <div class="table-wrapper">
+                                <table id="table-overview">
+                                    <thead>
+                                        <tr>
+                                            <th onclick="sortTable('table-overview', 0)">Company</th>
+                                            <th onclick="sortTable('table-overview', 1)">Buyer</th>
+                                            <th onclick="sortTable('table-overview', 2)">Account Status</th>
+                                            <th onclick="sortTable('table-overview', 3)">AM Names</th>
+                                            <th onclick="sortTable('table-overview', 4)">Out. Balance</th>
+                                            <th onclick="sortTable('table-overview', 5)">Facility Size</th>
+                                            <th onclick="sortTable('table-overview', 6)">Utilisation</th>
+                                            <th onclick="sortTable('table-overview', 7)">180-Day Alert</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pagination" id="pagination-overview"></div>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="max-width: 500px;">
+                        <div class="chart-header">
+                            <h3>Utilisation Distribution</h3>
+                            <button class="btn btn-outline" onclick="exportChart('chart-util', 'Utilisation_Distribution.png')">Export PNG</button>
+                        </div>
+                        <canvas id="chart-util"></canvas>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Invoices & Repayments -->
+                <div id="tab-invoices" class="tab-content">
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-title">Total Repayments (Current Month)</div>
+                            <div class="kpi-value num" id="kpi-total-repayments">$0</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3>Invoices & Repayments (Current Month)</h3>
+                            <button class="btn btn-outline" onclick="exportTableToCSV('table-invoices', 'Invoices_Repayments.csv')">Export CSV</button>
+                        </div>
+                        <div class="table-container">
+                            <div class="table-wrapper">
+                                <table id="table-invoices">
+                                    <thead>
+                                        <tr>
+                                            <th onclick="sortTable('table-invoices', 0)">Buyer</th>
+                                            <th onclick="sortTable('table-invoices', 1)">Company</th>
+                                            <th onclick="sortTable('table-invoices', 2)">AM</th>
+                                            <th onclick="sortTable('table-invoices', 3)">Due Date</th>
+                                            <th onclick="sortTable('table-invoices', 4)">Settlement Date</th>
+                                            <th onclick="sortTable('table-invoices', 5)">Repayment Amt</th>
+                                            <th onclick="sortTable('table-invoices', 6)">Flags</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pagination" id="pagination-invoices"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Workable Inactive AM -->
+                <div id="tab-inactive" class="tab-content">
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-title">Inactive Accounts Count</div>
+                            <div class="kpi-value num" id="kpi-inactive-count">0</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">Total Outstanding Balance</div>
+                            <div class="kpi-value num" id="kpi-inactive-out">$0</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-title">Total Facility Size</div>
+                            <div class="kpi-value num" id="kpi-inactive-fac">$0</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <div class="chart-header">
+                            <h3>Workable Inactive Accounts</h3>
+                            <button class="btn btn-outline" onclick="exportTableToCSV('table-inactive', 'Workable_Inactive.csv')">Export CSV</button>
+                        </div>
+                        <div class="table-container">
+                            <div class="table-wrapper">
+                                <table id="table-inactive">
+                                    <thead>
+                                        <tr>
+                                            <th onclick="sortTable('table-inactive', 0)">Buyer</th>
+                                            <th onclick="sortTable('table-inactive', 1)">Company</th>
+                                            <th onclick="sortTable('table-inactive', 2)">AM Names</th>
+                                            <th onclick="sortTable('table-inactive', 3)">Out. Balance</th>
+                                            <th onclick="sortTable('table-inactive', 4)">Facility Size</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pagination" id="pagination-inactive"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Top 15 Accounts -->
+                <div id="tab-top15" class="tab-content">
+                    <div class="grid-2">
+                        <div class="chart-container" style="grid-column: 1 / -1;">
+                            <div class="chart-header">
+                                <h3>Top 15 Accounts by Facility Size</h3>
+                                <button class="btn btn-outline" onclick="exportChart('chart-top15', 'Top_15_Accounts.png')">Export PNG</button>
+                            </div>
+                            <canvas id="chart-top15" style="max-height: 400px;"></canvas>
+                        </div>
+                        <div class="chart-container" style="grid-column: 1 / -1;">
+                            <div class="table-container">
+                                <div class="table-wrapper">
+                                    <table id="table-top15">
+                                        <thead>
+                                            <tr>
+                                                <th>Rank</th>
+                                                <th>Buyer</th>
+                                                <th>Company</th>
+                                                <th>Facility Size</th>
+                                                <th>Out. Balance</th>
+                                                <th>Utilisation</th>
+                                                <th>AM Names</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 5: Leadership Direct -->
+                <div id="tab-leadership" class="tab-content">
+                    <div class="grid-2">
+                        <div class="chart-container">
+                            <div class="chart-header">
+                                <h3>Facility Size Distribution (Top 50 Direct)</h3>
+                                <button class="btn btn-outline" onclick="exportChart('chart-leadership', 'Leadership_Distribution.png')">Export PNG</button>
+                            </div>
+                            <canvas id="chart-leadership"></canvas>
+                        </div>
+                        <div class="chart-container">
+                            <div class="chart-header">
+                                <h3>Leadership Direct (Top 50)</h3>
+                                <button class="btn btn-outline" onclick="exportTableToCSV('table-leadership', 'Leadership_Direct.csv')">Export CSV</button>
+                            </div>
+                            <div class="table-container">
+                                <div class="table-wrapper">
+                                    <table id="table-leadership">
+                                        <thead>
+                                            <tr>
+                                                <th>Rank</th>
+                                                <th>Buyer</th>
+                                                <th>Company</th>
+                                                <th>Facility Size</th>
+                                                <th>Utilisation</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        /* State */
+        let globalData = [];
+        let filteredData = [];
+        let charts = {};
+        
+        const VALID_STATUSES = [
+            'Workable-Active',
+            'Workable-Inactive (AM)',
+            'Workable-Temporarily Suspended',
+            'Team Direct'
+        ];
+
+        /* Utility Functions */
+        function formatCurrency(val) {
+            if (!val || isNaN(val)) return '$0.00';
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+        }
+
+        function formatNumber(val) {
+            if (!val || isNaN(val)) return '0';
+            return new Intl.NumberFormat('en-US').format(val);
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+
+        function toggleTheme() {
+            const doc = document.documentElement;
+            const currentTheme = doc.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            doc.setAttribute('data-theme', newTheme);
+            
+            // Update chart themes
+            const textColor = newTheme === 'dark' ? '#f7fafc' : '#2d3748';
+            Chart.defaults.color = textColor;
+            Chart.defaults.scale.grid.color = newTheme === 'dark' ? '#4a5568' : '#e2e8f0';
+            
+            for (let id in charts) {
+                charts[id].update();
+            }
+        }
+
+        function switchTab(tabId, el) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            el.classList.add('active');
+            
+            // Re-render specific tab charts to ensure animation
+            if (tabId === 'tab-overview' && charts['chart-util']) charts['chart-util'].update();
+            if (tabId === 'tab-top15' && charts['chart-top15']) charts['chart-top15'].update();
+            if (tabId === 'tab-leadership' && charts['chart-leadership']) charts['chart-leadership'].update();
+        }
+
+        function showWarning(msg) {
+            const w = document.getElementById('warning-banner');
+            w.textContent = msg;
+            w.style.display = 'block';
+            setTimeout(() => { w.style.display = 'none'; }, 5000);
+        }
+
+        /* File Processing Logic */
+        async function readExcelFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array', cellDates: true});
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const json = XLSX.utils.sheet_to_json(worksheet, {raw: false, dateNF: 'yyyy-mm-dd'});
+                        resolve(json);
+                    } catch(err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        async function handleSingleUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            document.getElementById('loading-overlay').style.display = 'flex';
+            try {
+                const rawData = await readExcelFile(file);
+                processRawData(rawData);
+            } catch (err) {
+                console.error(err);
+                alert("Error processing file. Ensure it is a valid Excel/CSV.");
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        }
+
+        async function handleMultiUpload() {
+            const fm = document.getElementById('file-master').files[0];
+            const f1 = document.getElementById('file-view1').files[0];
+            const f2 = document.getElementById('file-view2').files[0];
+            
+            if (!fm || !f1 || !f2) {
+                alert("Please select all three files.");
+                return;
+            }
+
+            document.getElementById('loading-overlay').style.display = 'flex';
+            try {
+                const [masterData, view1Data, view2Data] = await Promise.all([
+                    readExcelFile(fm), readExcelFile(f1), readExcelFile(f2)
+                ]);
+
+                // Merge logic (using Buyer as the key, falling back to Company if Buyer missing?)
+                const map = new Map();
+                
+                masterData.forEach(row => {
+                    const key = row['Buyer'] || row['Company'] || Math.random().toString();
+                    map.set(key, {...row});
+                });
+
+                view1Data.forEach(row => {
+                    const key = row['Buyer'] || row['Company'];
+                    if (map.has(key)) {
+                        map.set(key, {...map.get(key), ...row});
+                    } else if (key) {
+                        map.set(key, {...row});
+                    }
+                });
+
+                view2Data.forEach(row => {
+                    const key = row['Buyer'] || row['Company'];
+                    if (map.has(key)) {
+                        map.set(key, {...map.get(key), ...row});
+                    } else if (key) {
+                        map.set(key, {...row});
+                    }
+                });
+
+                const mergedData = Array.from(map.values());
+                processRawData(mergedData);
+            } catch(err) {
+                console.error(err);
+                alert("Error processing files.");
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        }
+
+        function processRawData(data) {
+            // Check for missing columns warning
+            const requiredCols = [
+                'Buyer', 'Account_Status', 'AM Names', 'Company', 'Outstanding Balance', 
+                'Facility Size', 'Due Date of Invoice', 'Settlement Date', 'AM', 
+                'Payment Total USD', 'Last Disbursed Date'
+            ];
+            
+            if (data.length > 0) {
+                const keys = Object.keys(data[0]);
+                const missing = requiredCols.filter(c => !keys.includes(c));
+                if (missing.length > 0) {
+                    showWarning(`Warning: Missing columns - ${missing.join(', ')}`);
+                }
+            }
+
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+
+            // Repayment deduplication prep (Buyer + Settlement Date)
+            const repayMap = new Map();
+
+            // First pass for deduplication
+            data.forEach(row => {
+                const buyer = row['Buyer'] || 'Unknown';
+                const sDate = row['Settlement Date'] ? new Date(row['Settlement Date']).getTime() : 'None';
+                const payment = parseFloat(row['Payment Total USD'] || 0);
+                
+                if (payment > 0) {
+                    const key = `${buyer}_${sDate}`;
+                    if (!repayMap.has(key)) repayMap.set(key, 0);
+                    repayMap.set(key, repayMap.get(key) + payment);
+                }
+            });
+
+            // Second pass for main parsing
+            const processed = [];
+            data.forEach(row => {
+                // Filter account status
+                const status = row['Account_Status'];
+                if (!VALID_STATUSES.includes(status)) return; // Discard invalid
+
+                const outBal = parseFloat(row['Outstanding Balance'] || 0);
+                const facSize = parseFloat(row['Facility Size'] || 0);
+                let util = 0;
+                if (facSize > 0) util = (outBal / facSize) * 100;
+
+                // 180 day alert
+                let alert180 = 'NO';
+                if (row['Last Disbursed Date']) {
+                    const ldd = new Date(row['Last Disbursed Date']);
+                    const diffTime = Math.abs(now - ldd);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    if (diffDays > 180) alert180 = 'YES';
+                }
+
+                // AM Name assignment
+                let amNames = row['AM Names'] || row['AM'];
+                let buyer = row['Buyer'];
+                if (!buyer || buyer.toString().trim() === '') {
+                    amNames = 'Unassigned';
+                } else if (!amNames || amNames.toString().trim() === '') {
+                    amNames = 'Unassigned';
+                }
+
+                // Month Rule for Tab 2
+                let inCurrentMonth = false;
+                const dDue = row['Due Date of Invoice'] ? new Date(row['Due Date of Invoice']) : null;
+                const dSet = row['Settlement Date'] ? new Date(row['Settlement Date']) : null;
+
+                if (dDue && dDue.getMonth() === currentMonth && dDue.getFullYear() === currentYear) inCurrentMonth = true;
+                if (dSet && dSet.getMonth() === currentMonth && dSet.getFullYear() === currentYear) inCurrentMonth = true;
+
+                // Deduplicated Payment
+                const sDateRaw = row['Settlement Date'] ? new Date(row['Settlement Date']).getTime() : 'None';
+                const dedupKey = `${buyer || 'Unknown'}_${sDateRaw}`;
+                const dedupPayment = repayMap.get(dedupKey) || 0;
+
+                processed.push({
+                    buyer: buyer,
+                    company: row['Company'],
+                    status: status,
+                    amNames: amNames,
+                    outBal: outBal,
+                    facSize: facSize,
+                    util: util,
+                    alert180: alert180,
+                    dueDate: row['Due Date of Invoice'],
+                    settleDate: row['Settlement Date'],
+                    repayment: dedupPayment,
+                    inCurrentMonth: inCurrentMonth,
+                    dedupKey: dedupKey
+                });
+            });
+
+            globalData = processed;
+            
+            // Populate Global Filters
+            const amSet = new Set();
+            const stSet = new Set();
+            globalData.forEach(d => {
+                if (d.amNames) amSet.add(d.amNames);
+                if (d.status) stSet.add(d.status);
+            });
+
+            const amSelect = document.getElementById('global-am-filter');
+            amSelect.innerHTML = '<option value="All">All AMs</option>';
+            Array.from(amSet).sort().forEach(am => amSelect.add(new Option(am, am)));
+
+            const stSelect = document.getElementById('global-status-filter');
+            stSelect.innerHTML = '<option value="All">All Statuses</option>';
+            Array.from(stSet).sort().forEach(st => stSelect.add(new Option(st, st)));
+
+            document.getElementById('upload-view').style.display = 'none';
+            document.getElementById('dashboard-view').style.display = 'flex';
+            document.getElementById('loading-overlay').style.display = 'none';
+
+            applyFilters();
+        }
+
+        /* Rendering & Filtering */
+        function applyFilters() {
+            const amF = document.getElementById('global-am-filter').value;
+            const stF = document.getElementById('global-status-filter').value;
+            const q = document.getElementById('global-search').value.toLowerCase();
+
+            filteredData = globalData.filter(d => {
+                const matchAm = amF === 'All' || d.amNames === amF;
+                const matchSt = stF === 'All' || d.status === stF;
+                const matchQ = !q || (d.company && d.company.toLowerCase().includes(q)) || (d.buyer && d.buyer.toLowerCase().includes(q));
+                return matchAm && matchSt && matchQ;
+            });
+
+            renderAllTabs();
+        }
+
+        function getUtilBadge(util) {
+            if (util >= 70) return `<span class="badge badge-high">${util.toFixed(1)}%</span>`;
+            if (util >= 50) return `<span class="badge badge-medium">${util.toFixed(1)}%</span>`;
+            return `<span class="badge badge-low">${util.toFixed(1)}%</span>`;
+        }
+
+        // Pagination State
+        const pageState = { overview: 1, invoices: 1, inactive: 1 };
+        const PAGE_SIZE = 25;
+
+        function renderPagination(tabId, totalItems, tableId) {
+            const pages = Math.ceil(totalItems / PAGE_SIZE);
+            const pCont = document.getElementById(`pagination-${tabId}`);
+            if (!pCont) return;
+            
+            if (pages <= 1) {
+                pCont.innerHTML = '';
+                return;
+            }
+
+            let curr = pageState[tabId];
+            pCont.innerHTML = `
+                <span style="font-size:14px; color:var(--text-muted);">Showing ${(curr-1)*PAGE_SIZE + 1} to ${Math.min(curr*PAGE_SIZE, totalItems)} of ${totalItems} entries</span>
+                <div>
+                    <button class="btn btn-outline" ${curr === 1 ? 'disabled' : ''} onclick="changePage('${tabId}', -1, '${tableId}')">Previous</button>
+                    <span style="margin: 0 10px; font-size:14px;">Page ${curr} of ${pages}</span>
+                    <button class="btn btn-outline" ${curr === pages ? 'disabled' : ''} onclick="changePage('${tabId}', 1, '${tableId}')">Next</button>
+                </div>
+            `;
+        }
+
+        function changePage(tabId, dir, tableId) {
+            pageState[tabId] += dir;
+            if (tabId === 'overview') renderOverviewTable();
+            if (tabId === 'invoices') renderInvoicesTable();
+            if (tabId === 'inactive') renderInactiveTable();
+        }
+
+        function renderAllTabs() {
+            pageState.overview = 1;
+            pageState.invoices = 1;
+            pageState.inactive = 1;
+
+            renderOverviewTab();
+            renderInvoicesTab();
+            renderInactiveTab();
+            renderTop15Tab();
+            renderLeadershipTab();
+        }
+
+        /* Tab 1: Overview */
+        function renderOverviewTab() {
+            renderOverviewTable();
+            
+            let low = 0, med = 0, high = 0;
+            filteredData.forEach(d => {
+                if (d.util >= 70) high++;
+                else if (d.util >= 50) med++;
+                else low++;
+            });
+
+            const ctx = document.getElementById('chart-util').getContext('2d');
+            if (charts['chart-util']) charts['chart-util'].destroy();
+            charts['chart-util'] = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Low (<50%)', 'Medium (50-69%)', 'High (≥70%)'],
+                    datasets: [{
+                        data: [low, med, high],
+                        backgroundColor: ['#38a169', '#dd6b20', '#e53e3e'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+        }
+
+        function renderOverviewTable() {
+            const tbody = document.querySelector('#table-overview tbody');
+            tbody.innerHTML = '';
+            
+            const start = (pageState.overview - 1) * PAGE_SIZE;
+            const end = start + PAGE_SIZE;
+            const paginated = filteredData.slice(start, end);
+
+            paginated.forEach(d => {
+                const tr = document.createElement('tr');
+                let alertBadge = d.alert180 === 'YES' ? `<span class="badge badge-amber">YES</span>` : 'NO';
+                if (d.alert180 === 'YES') tr.style.backgroundColor = 'rgba(221, 107, 32, 0.05)';
+
+                tr.innerHTML = `
+                    <td>${d.company || '-'}</td>
+                    <td>${d.buyer || '-'}</td>
+                    <td>${d.status || '-'}</td>
+                    <td>${d.amNames || '-'}</td>
+                    <td class="num">${formatCurrency(d.outBal)}</td>
+                    <td class="num">${formatCurrency(d.facSize)}</td>
+                    <td>${getUtilBadge(d.util)}</td>
+                    <td>${alertBadge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            renderPagination('overview', filteredData.length, 'table-overview');
+        }
+
+        /* Tab 2: Invoices & Repayments */
+        function renderInvoicesTab() {
+            const monthData = filteredData.filter(d => d.inCurrentMonth);
+            const seenKeys = new Set();
+            let totalRepay = 0;
+            monthData.forEach(d => {
+                if (!seenKeys.has(d.dedupKey)) {
+                    seenKeys.add(d.dedupKey);
+                    totalRepay += d.repayment;
+                }
+            });
+            
+            document.getElementById('kpi-total-repayments').innerText = formatCurrency(totalRepay);
+            renderInvoicesTable();
+        }
+
+        function renderInvoicesTable() {
+            const monthData = filteredData.filter(d => d.inCurrentMonth);
+            const uniqueMonthMap = new Map();
+            monthData.forEach(d => {
+                if (!uniqueMonthMap.has(d.dedupKey)) {
+                    uniqueMonthMap.set(d.dedupKey, d);
+                }
+            });
+            const uniqueMonthData = Array.from(uniqueMonthMap.values());
+
+            const tbody = document.querySelector('#table-invoices tbody');
+            tbody.innerHTML = '';
+            
+            const start = (pageState.invoices - 1) * PAGE_SIZE;
+            const end = start + PAGE_SIZE;
+            const paginated = uniqueMonthData.slice(start, end);
+
+            paginated.forEach(d => {
+                let flags = [];
+                let newUtil = 0;
+                if (d.facSize > 0) newUtil = (d.outBal - d.repayment) / d.facSize;
+                if (newUtil < 0.5) flags.push('<span class="badge badge-low" title="Low Utilisation Post-Repayment (<50%)">Low Util</span>');
+                
+                if (!d.settleDate) flags.push('<span class="badge badge-amber" title="Collect Amount (Settlement Date Blank)">Collect Amount</span>');
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${d.buyer || '-'}</td>
+                    <td>${d.company || '-'}</td>
+                    <td>${d.amNames || '-'}</td>
+                    <td class="num">${formatDate(d.dueDate)}</td>
+                    <td class="num">${formatDate(d.settleDate) || '-'}</td>
+                    <td class="num" style="font-weight: 500;">${formatCurrency(d.repayment)}</td>
+                    <td>${flags.join(' ')}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            renderPagination('invoices', uniqueMonthData.length, 'table-invoices');
+        }
+
+        /* Tab 3: Inactive */
+        function renderInactiveTab() {
+            const inactiveData = filteredData.filter(d => d.status === 'Workable-Inactive (AM)');
+            
+            const count = inactiveData.length;
+            const outSum = inactiveData.reduce((acc, d) => acc + d.outBal, 0);
+            const facSum = inactiveData.reduce((acc, d) => acc + d.facSize, 0);
+
+            document.getElementById('kpi-inactive-count').innerText = formatNumber(count);
+            document.getElementById('kpi-inactive-out').innerText = formatCurrency(outSum);
+            document.getElementById('kpi-inactive-fac').innerText = formatCurrency(facSum);
+
+            renderInactiveTable(inactiveData);
+        }
+
+        function renderInactiveTable(inactiveData) {
+            inactiveData = inactiveData || filteredData.filter(d => d.status === 'Workable-Inactive (AM)');
+            const tbody = document.querySelector('#table-inactive tbody');
+            tbody.innerHTML = '';
+            
+            const start = (pageState.inactive - 1) * PAGE_SIZE;
+            const end = start + PAGE_SIZE;
+            const paginated = inactiveData.slice(start, end);
+
+            paginated.forEach(d => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${d.buyer || '-'}</td>
+                    <td>${d.company || '-'}</td>
+                    <td>${d.amNames || '-'}</td>
+                    <td class="num">${formatCurrency(d.outBal)}</td>
+                    <td class="num">${formatCurrency(d.facSize)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            renderPagination('inactive', inactiveData.length, 'table-inactive');
+        }
+
+        /* Tab 4: Top 15 */
+        function renderTop15Tab() {
+            const top15 = [...filteredData].sort((a, b) => b.facSize - a.facSize).slice(0, 15);
+            
+            const tbody = document.querySelector('#table-top15 tbody');
+            tbody.innerHTML = '';
+            top15.forEach((d, i) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="num">${i+1}</td>
+                    <td>${d.buyer || '-'}</td>
+                    <td>${d.company || '-'}</td>
+                    <td class="num">${formatCurrency(d.facSize)}</td>
+                    <td class="num">${formatCurrency(d.outBal)}</td>
+                    <td>${getUtilBadge(d.util)}</td>
+                    <td>${d.amNames || '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            const labels = top15.map(d => d.buyer || d.company || 'Unknown');
+            const facData = top15.map(d => d.facSize);
+            const outData = top15.map(d => d.outBal);
+
+            const ctx = document.getElementById('chart-top15').getContext('2d');
+            if (charts['chart-top15']) charts['chart-top15'].destroy();
+            charts['chart-top15'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Facility Size', data: facData, backgroundColor: '#008080' },
+                        { label: 'Outstanding Balance', data: outData, backgroundColor: '#4fd1c5' }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { callback: v => '$' + v/1000 + 'k' } }
+                    }
+                }
+            });
+        }
+
+        /* Tab 5: Leadership Direct */
+        function renderLeadershipTab() {
+            const teamDirect = filteredData.filter(d => d.status === 'Team Direct');
+            const top50 = [...teamDirect].sort((a, b) => b.facSize - a.facSize).slice(0, 50);
+
+            const tbody = document.querySelector('#table-leadership tbody');
+            tbody.innerHTML = '';
+            top50.forEach((d, i) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="num">${i+1}</td>
+                    <td>${d.buyer || '-'}</td>
+                    <td>${d.company || '-'}</td>
+                    <td class="num">${formatCurrency(d.facSize)}</td>
+                    <td>${getUtilBadge(d.util)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            const labels = top50.map(d => d.buyer || 'Unknown').slice(0, 10);
+            const facData = top50.map(d => d.facSize).slice(0, 10);
+
+            const ctx = document.getElementById('chart-leadership').getContext('2d');
+            if (charts['chart-leadership']) charts['chart-leadership'].destroy();
+            charts['chart-leadership'] = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: facData,
+                        backgroundColor: ['#008080', '#20b2aa', '#48d1cc', '#40e0d0', '#7fffd4', '#00ced1', '#5f9ea0', '#4682b4', '#b0c4de', '#87ceeb']
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'right' } } }
+            });
+        }
+
+        /* Table Sorting Logic */
+        let sortStates = {};
+        function sortTable(tableId, colIndex) {
+            const key = `${tableId}_${colIndex}`;
+            sortStates[key] = !sortStates[key]; 
+
+            const table = document.getElementById(tableId);
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+
+            rows.sort((a, b) => {
+                let cellA = a.children[colIndex].innerText.replace(/[^0-9.-]+/g,"");
+                let cellB = b.children[colIndex].innerText.replace(/[^0-9.-]+/g,"");
+                
+                if (cellA === '' || isNaN(cellA)) cellA = a.children[colIndex].innerText.toLowerCase();
+                else cellA = parseFloat(cellA);
+
+                if (cellB === '' || isNaN(cellB)) cellB = b.children[colIndex].innerText.toLowerCase();
+                else cellB = parseFloat(cellB);
+
+                if (cellA < cellB) return sortStates[key] ? -1 : 1;
+                if (cellA > cellB) return sortStates[key] ? 1 : -1;
+                return 0;
+            });
+
+            tbody.innerHTML = '';
+            rows.forEach(r => tbody.appendChild(r));
+        }
+
+        /* Export Logic */
+        function exportTableToCSV(tableId, filename) {
+            const table = document.getElementById(tableId);
+            let csv = [];
+            for (let i = 0; i < table.rows.length; i++) {
+                let row = [], cols = table.rows[i].querySelectorAll("td, th");
+                for (let j = 0; j < cols.length; j++) 
+                    row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"');
+                csv.push(row.join(","));
+            }
+            downloadFile(csv.join("\n"), filename, 'text/csv');
+        }
+
+        function exportChart(chartId, filename) {
+            const canvas = document.getElementById(chartId);
+            const imgData = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = imgData;
+            link.download = filename;
+            link.click();
+        }
+
+        function downloadFile(content, filename, type) {
+            const blob = new Blob([content], { type: type });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            window.URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
