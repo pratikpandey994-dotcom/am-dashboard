@@ -47,7 +47,7 @@ def generate_sample_data():
         if np.random.random() < 0.3:
             due_date = now + timedelta(days=np.random.randint(-15, 15))
         else:
-            due_date = now + timedelta(days=np.random.randint(30, 90))
+            due_date = now - timedelta(days=np.random.randint(30, 365 * 3)) # Historical data
             
         settle_date = due_date if np.random.random() < 0.5 else pd.NaT
         repay = out_bal * np.random.uniform(0.1, 0.5) if pd.notna(settle_date) else 0
@@ -80,52 +80,37 @@ def load_and_merge_data(single_file, master_file, view1_file, view2_file):
             df_v2 = parse_file(view2_file)
             
             # --- MAPPING LOGIC ---
+            if 'Facility_Size' in df_master.columns: df_master = df_master.rename(columns={'Facility_Size': 'Facility Size'})
+            if 'OB' in df_master.columns: df_master = df_master.rename(columns={'OB': 'Master_OB'})
+            if 'AM' in df_master.columns: df_master = df_master.rename(columns={'AM': 'Master_AM'})
             
-            # 1. Map Masterdata
-            if 'Facility_Size' in df_master.columns:
-                df_master = df_master.rename(columns={'Facility_Size': 'Facility Size'})
-            if 'OB' in df_master.columns:
-                df_master = df_master.rename(columns={'OB': 'Master_OB'})
-            if 'AM' in df_master.columns:
-                df_master = df_master.rename(columns={'AM': 'Master_AM'})
-            
-            # Clean Account Status string formatting
+            # Clean Account Status rigorously
             if 'Account_Status' in df_master.columns:
-                # Remove spaces around hyphens: "Workable - Active" -> "Workable-Active"
-                df_master['Account_Status'] = df_master['Account_Status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip()
+                # Remove spaces around hyphens and title case it so "temporarily suspended" becomes "Temporarily Suspended"
+                df_master['Account_Status'] = df_master['Account_Status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip().str.title()
+                # Fix specific casing for (AM)
+                df_master['Account_Status'] = df_master['Account_Status'].str.replace('(Am)', '(AM)', regex=False)
             
-            # 2. Map View 1
-            if 'company' in df_v1.columns:
-                df_v1 = df_v1.rename(columns={'company': 'Buyer'}) # Align join key
-            if 'Outstanding_Balance' in df_v1.columns:
-                df_v1 = df_v1.rename(columns={'Outstanding_Balance': 'View1_OB'})
-            if 'Last_Disbursed_Date' in df_v1.columns:
-                df_v1 = df_v1.rename(columns={'Last_Disbursed_Date': 'Last Disbursed Date'})
-            if 'AM_Name' in df_v1.columns:
-                df_v1 = df_v1.rename(columns={'AM_Name': 'View1_AM'})
+            if 'company' in df_v1.columns: df_v1 = df_v1.rename(columns={'company': 'Buyer'})
+            if 'Outstanding_Balance' in df_v1.columns: df_v1 = df_v1.rename(columns={'Outstanding_Balance': 'View1_OB'})
+            if 'Last_Disbursed_Date' in df_v1.columns: df_v1 = df_v1.rename(columns={'Last_Disbursed_Date': 'Last Disbursed Date'})
+            if 'AM_Name' in df_v1.columns: df_v1 = df_v1.rename(columns={'AM_Name': 'View1_AM'})
                 
-            # 3. Map View 2
-            if 'due_date_of_invoice' in df_v2.columns:
-                df_v2 = df_v2.rename(columns={'due_date_of_invoice': 'Due Date of Invoice'})
-            if 'settlement_date' in df_v2.columns:
-                df_v2 = df_v2.rename(columns={'settlement_date': 'Settlement Date'})
-            if 'payment_total_usd' in df_v2.columns:
-                df_v2 = df_v2.rename(columns={'payment_total_usd': 'Payment Total USD'})
+            if 'due_date_of_invoice' in df_v2.columns: df_v2 = df_v2.rename(columns={'due_date_of_invoice': 'Due Date of Invoice'})
+            if 'settlement_date' in df_v2.columns: df_v2 = df_v2.rename(columns={'settlement_date': 'Settlement Date'})
+            if 'payment_total_usd' in df_v2.columns: df_v2 = df_v2.rename(columns={'payment_total_usd': 'Payment Total USD'})
             
-            # --- MERGING LOGIC ---
-            
-            # Master + View 1
+            # Merge Master + View 1
             df = pd.merge(df_master, df_v1, on='Buyer', how='outer', suffixes=('', '_drop1'))
             
             # Resolve combined columns (Prioritize View 1 for OB, Master for AM)
             df['Outstanding Balance'] = df.get('View1_OB', pd.Series(dtype=float)).combine_first(df.get('Master_OB', pd.Series(dtype=float)))
             df['AM Names'] = df.get('Master_AM', pd.Series(dtype=str)).combine_first(df.get('View1_AM', pd.Series(dtype=str)))
-            df['Company'] = df['Buyer'] # Set Company = Buyer for the UI display
+            df['Company'] = df['Buyer'] 
             
             # Master/V1 + View 2
             df = pd.merge(df, df_v2, on='Buyer', how='outer', suffixes=('', '_drop2'))
             
-            # Clean up
             df = df.loc[:, ~df.columns.str.endswith('_drop1')]
             df = df.loc[:, ~df.columns.str.endswith('_drop2')]
             
@@ -146,6 +131,7 @@ def process_data(df):
         if col not in df.columns:
             df[col] = pd.NA
             
+    # Apply Strict Filter for Valid Statuses
     df = df[df['Account_Status'].isin(VALID_STATUSES)].copy()
     
     df['Outstanding Balance'] = pd.to_numeric(df['Outstanding Balance'], errors='coerce').fillna(0)
@@ -172,33 +158,15 @@ def process_data(df):
     now = pd.Timestamp.now()
     df['Days Since Disbursed'] = (now - df['Last Disbursed Date']).dt.days
     df['180-Day Alert'] = df['Days Since Disbursed'].apply(lambda x: 'YES' if pd.notna(x) and x > 180 else 'NO')
-    
-    curr_month = now.month
-    curr_year = now.year
-    df['In Current Month'] = False
-    mask_due = (df['Due Date of Invoice'].dt.month == curr_month) & (df['Due Date of Invoice'].dt.year == curr_year)
-    mask_settle = (df['Settlement Date'].dt.month == curr_month) & (df['Settlement Date'].dt.year == curr_year)
-    df.loc[mask_due | mask_settle, 'In Current Month'] = True
 
     df['Buyer_Clean'] = df['Buyer'].fillna('Unknown')
     df['Settle_Date_Clean'] = df['Settlement Date'].dt.date.fillna('None')
     
+    # Pre-calculate Dedup Logic globally
     dedup_sum = df[df['Payment Total USD'] > 0].groupby(['Buyer_Clean', 'Settle_Date_Clean'])['Payment Total USD'].sum().reset_index()
     dedup_sum.rename(columns={'Payment Total USD': 'Deduplicated Repayment'}, inplace=True)
-    
     df = pd.merge(df, dedup_sum, on=['Buyer_Clean', 'Settle_Date_Clean'], how='left')
     df['Deduplicated Repayment'] = df['Deduplicated Repayment'].fillna(0)
-    
-    def get_global_flags(row):
-        flags = []
-        if pd.isna(row['Settlement Date']) and row['In Current Month']: 
-            flags.append("Collect Amount (Missing Settle Date)")
-        if row['Facility Size'] > 0 and row['In Current Month']:
-            post_util = (row['Outstanding Balance'] - row['Deduplicated Repayment']) / row['Facility Size']
-            if post_util < 0.5: flags.append("Low Util Post-Repay")
-        return " | ".join(flags) if flags else "None"
-        
-    df['Invoice Flags'] = df.apply(get_global_flags, axis=1)
     
     return df
 
@@ -240,17 +208,28 @@ with st.sidebar:
 if st.session_state.master_df is not None:
     df = st.session_state.master_df
     
+    # 1. Available Months Logic (Fixing the Empty Month Bug)
+    all_dates = pd.concat([df['Due Date of Invoice'], df['Settlement Date']]).dropna()
+    if not all_dates.empty:
+        available_months = sorted(all_dates.dt.to_period('M').unique().astype(str), reverse=True)
+    else:
+        available_months = [pd.Timestamp.now().strftime('%Y-%m')]
+
+    # 2. Global Filters
     st.markdown("### 🎛️ Global Portfolio Filters")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
+        selected_month = st.selectbox("Selected Month (Invoices)", available_months)
+    with col2:
         am_options = ["All AMs"] + sorted(list(df['AM Names'].dropna().unique()))
         selected_am = st.selectbox("AM Name", am_options)
-    with col2:
+    with col3:
         status_options = ["All Statuses"] + sorted(list(df['Account_Status'].dropna().unique()))
         selected_status = st.selectbox("Account Status", status_options)
-    with col3:
+    with col4:
         search_query = st.text_input("Search Company or Buyer", placeholder="Type to search...")
         
+    # Apply Global Filters
     filtered_df = df.copy()
     if selected_am != "All AMs": filtered_df = filtered_df[filtered_df['AM Names'] == selected_am]
     if selected_status != "All Statuses": filtered_df = filtered_df[filtered_df['Account_Status'] == selected_status]
@@ -259,15 +238,26 @@ if st.session_state.master_df is not None:
         mask = filtered_df['Company'].str.lower().str.contains(query, na=False) | filtered_df['Buyer'].str.lower().str.contains(query, na=False)
         filtered_df = filtered_df[mask]
         
+    # Apply Month Filter for the specific 'month_df'
+    filtered_df['In Selected Month'] = False
+    mask_due = (filtered_df['Due Date of Invoice'].dt.to_period('M').astype(str) == selected_month)
+    mask_settle = (filtered_df['Settlement Date'].dt.to_period('M').astype(str) == selected_month)
+    filtered_df.loc[mask_due | mask_settle, 'In Selected Month'] = True
+    
+    month_df = filtered_df[filtered_df['In Selected Month'] == True].copy()
+    
+    # 3. Separate the Unique Accounts (Fixing the Duplicate Multiplication Bug)
+    # We take exactly ONE row per buyer for facility/outstanding KPI math so we don't multiply by # of invoices
     unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
     
     st.divider()
 
+    # --- TOP ROW KPIs ---
     tot_fac = unique_accts['Facility Size'].sum()
     tot_out = unique_accts['Outstanding Balance'].sum()
     glob_util = (tot_out / tot_fac * 100) if tot_fac > 0 else 0
     
-    month_df = filtered_df[filtered_df['In Current Month'] == True].copy()
+    # Repayments KPI (Deduplicated properly)
     unique_repayments = month_df.drop_duplicates(subset=['Buyer_Clean', 'Settle_Date_Clean'])
     tot_repay = unique_repayments['Deduplicated Repayment'].sum()
 
@@ -275,10 +265,11 @@ if st.session_state.master_df is not None:
     k1.metric("Total Facility Size", f"${tot_fac:,.0f}")
     k2.metric("Total Outstanding", f"${tot_out:,.0f}")
     k3.metric("Global Average Utilisation", f"{glob_util:.1f}%")
-    k4.metric("Collections (Present Month)", f"${tot_repay:,.0f}")
+    k4.metric(f"Collections ({selected_month})", f"${tot_repay:,.0f}")
     
     st.divider()
 
+    # --- MIDDLE ROW 1: PORTFOLIO & RISK ---
     c1, c2 = st.columns([6, 4])
     with c1:
         st.markdown("#### 🌍 Portfolio Concentration")
@@ -312,9 +303,10 @@ if st.session_state.master_df is not None:
 
     st.divider()
 
+    # --- MIDDLE ROW 2: TRENDS & LEADERBOARD ---
     c3, c4 = st.columns(2)
     with c3:
-        st.markdown("#### 💵 Daily Collections Trend (Present Month)")
+        st.markdown(f"#### 💵 Daily Collections Trend ({selected_month})")
         if not unique_repayments.empty:
             timeline_df = unique_repayments.groupby('Settle_Date_Clean')['Deduplicated Repayment'].sum().reset_index()
             timeline_df = timeline_df[timeline_df['Settle_Date_Clean'] != 'None']
@@ -325,7 +317,7 @@ if st.session_state.master_df is not None:
             fig_timeline.update_layout(margin = dict(t=10, l=10, r=10, b=10))
             st.plotly_chart(fig_timeline, use_container_width=True)
         else:
-            st.info("No settlements found for the current calendar month.")
+            st.info(f"No settlements found for {selected_month}.")
 
     with c4:
         st.markdown("#### 👑 AM Performance Leaderboard")
@@ -347,8 +339,21 @@ if st.session_state.master_df is not None:
 
     st.divider()
 
-    st.markdown("### 📋 Unified Master Data")
+    # --- MASTER DATA TABLE ---
+    st.markdown(f"### 📋 Unified Master Data ({selected_month})")
     st.write("All flags and logics (180-Day, Present Month, Low Utilisation) are pre-calculated and merged into this unified table.")
+    
+    # Calculate Post-Repayment flags specifically for the selected month
+    def get_global_flags(row):
+        flags = []
+        if pd.isna(row['Settlement Date']): 
+            flags.append("Collect Amount (Missing Settle Date)")
+        if row['Facility Size'] > 0:
+            post_util = (row['Outstanding Balance'] - row['Deduplicated Repayment']) / row['Facility Size']
+            if post_util < 0.5: flags.append("Low Util Post-Repay")
+        return " | ".join(flags) if flags else "None"
+        
+    month_df['Invoice Flags'] = month_df.apply(get_global_flags, axis=1)
     
     display_cols = [
         'Company', 'Buyer', 'Account_Status', 'AM Names', 
@@ -357,7 +362,7 @@ if st.session_state.master_df is not None:
         'Deduplicated Repayment', 'Invoice Flags'
     ]
     
-    table_df = filtered_df[display_cols].copy()
+    table_df = month_df[display_cols].copy()
     for date_col in ['Due Date of Invoice', 'Settlement Date']:
         table_df[date_col] = table_df[date_col].dt.strftime('%Y-%m-%d').fillna('')
         
