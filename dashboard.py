@@ -37,24 +37,19 @@ def generate_sample_data():
         buyer = np.random.choice(buyers)
         am = np.random.choice(ams)
         fac_size = np.random.uniform(50000, 2000000)
-        out_bal = fac_size * np.random.uniform(0.1, 1.1) # Sometimes over 100%
+        out_bal = fac_size * np.random.uniform(0.1, 1.1)
         
-        # 20% chance of being an old disbursement (>180 days)
         if np.random.random() < 0.2:
             last_disb = now - timedelta(days=np.random.randint(181, 300))
         else:
             last_disb = now - timedelta(days=np.random.randint(5, 170))
             
-        # 30% chance of invoice in current month
         if np.random.random() < 0.3:
             due_date = now + timedelta(days=np.random.randint(-15, 15))
         else:
             due_date = now + timedelta(days=np.random.randint(30, 90))
             
-        # 50% chance of having a settlement date
         settle_date = due_date if np.random.random() < 0.5 else pd.NaT
-        
-        # Repayment logic
         repay = out_bal * np.random.uniform(0.1, 0.5) if pd.notna(settle_date) else 0
         
         data.append({
@@ -78,20 +73,65 @@ def load_and_merge_data(single_file, master_file, view1_file, view2_file):
     try:
         if single_file is not None:
             df = parse_file(single_file)
+            return process_data(df)
         elif master_file and view1_file and view2_file:
             df_master = parse_file(master_file)
             df_v1 = parse_file(view1_file)
             df_v2 = parse_file(view2_file)
             
+            # --- MAPPING LOGIC ---
+            
+            # 1. Map Masterdata
+            if 'Facility_Size' in df_master.columns:
+                df_master = df_master.rename(columns={'Facility_Size': 'Facility Size'})
+            if 'OB' in df_master.columns:
+                df_master = df_master.rename(columns={'OB': 'Master_OB'})
+            if 'AM' in df_master.columns:
+                df_master = df_master.rename(columns={'AM': 'Master_AM'})
+            
+            # Clean Account Status string formatting
+            if 'Account_Status' in df_master.columns:
+                # Remove spaces around hyphens: "Workable - Active" -> "Workable-Active"
+                df_master['Account_Status'] = df_master['Account_Status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip()
+            
+            # 2. Map View 1
+            if 'company' in df_v1.columns:
+                df_v1 = df_v1.rename(columns={'company': 'Buyer'}) # Align join key
+            if 'Outstanding_Balance' in df_v1.columns:
+                df_v1 = df_v1.rename(columns={'Outstanding_Balance': 'View1_OB'})
+            if 'Last_Disbursed_Date' in df_v1.columns:
+                df_v1 = df_v1.rename(columns={'Last_Disbursed_Date': 'Last Disbursed Date'})
+            if 'AM_Name' in df_v1.columns:
+                df_v1 = df_v1.rename(columns={'AM_Name': 'View1_AM'})
+                
+            # 3. Map View 2
+            if 'due_date_of_invoice' in df_v2.columns:
+                df_v2 = df_v2.rename(columns={'due_date_of_invoice': 'Due Date of Invoice'})
+            if 'settlement_date' in df_v2.columns:
+                df_v2 = df_v2.rename(columns={'settlement_date': 'Settlement Date'})
+            if 'payment_total_usd' in df_v2.columns:
+                df_v2 = df_v2.rename(columns={'payment_total_usd': 'Payment Total USD'})
+            
+            # --- MERGING LOGIC ---
+            
+            # Master + View 1
             df = pd.merge(df_master, df_v1, on='Buyer', how='outer', suffixes=('', '_drop1'))
+            
+            # Resolve combined columns (Prioritize View 1 for OB, Master for AM)
+            df['Outstanding Balance'] = df.get('View1_OB', pd.Series(dtype=float)).combine_first(df.get('Master_OB', pd.Series(dtype=float)))
+            df['AM Names'] = df.get('Master_AM', pd.Series(dtype=str)).combine_first(df.get('View1_AM', pd.Series(dtype=str)))
+            df['Company'] = df['Buyer'] # Set Company = Buyer for the UI display
+            
+            # Master/V1 + View 2
             df = pd.merge(df, df_v2, on='Buyer', how='outer', suffixes=('', '_drop2'))
             
+            # Clean up
             df = df.loc[:, ~df.columns.str.endswith('_drop1')]
             df = df.loc[:, ~df.columns.str.endswith('_drop2')]
+            
+            return process_data(df)
         else:
             return None
-        
-        return process_data(df)
     except Exception as e:
         st.error(f"Error processing files: {str(e)}")
         return None
@@ -149,7 +189,6 @@ def process_data(df):
     df = pd.merge(df, dedup_sum, on=['Buyer_Clean', 'Settle_Date_Clean'], how='left')
     df['Deduplicated Repayment'] = df['Deduplicated Repayment'].fillna(0)
     
-    # Calculate Post-Repayment flags globally for the master table
     def get_global_flags(row):
         flags = []
         if pd.isna(row['Settlement Date']) and row['In Current Month']: 
@@ -166,11 +205,9 @@ def process_data(df):
 # --- UI LAYOUT ---
 st.title("📊 Unified AM Portfolio Dashboard")
 
-# Initialize Session State
 if 'master_df' not in st.session_state:
     st.session_state.master_df = None
 
-# Sidebar - Data Upload
 with st.sidebar:
     st.header("📂 Data Source")
     
@@ -193,18 +230,16 @@ with st.sidebar:
         view2_file = st.file_uploader("3. View 2", type=["xlsx", "csv"])
         
     if st.button("Process Files", use_container_width=True):
-        with st.spinner("Processing logic..."):
+        with st.spinner("Processing logic & Mapping Columns..."):
             df = load_and_merge_data(single_file, master_file, view1_file, view2_file)
             if df is not None:
                 st.session_state.master_df = df
-                st.success("Data successfully processed!")
+                st.success("Data successfully processed & mapped!")
                 st.rerun()
 
-# --- MAIN DASHBOARD AREA ---
 if st.session_state.master_df is not None:
     df = st.session_state.master_df
     
-    # 1. Global Filters (Always render perfectly if data exists)
     st.markdown("### 🎛️ Global Portfolio Filters")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -216,7 +251,6 @@ if st.session_state.master_df is not None:
     with col3:
         search_query = st.text_input("Search Company or Buyer", placeholder="Type to search...")
         
-    # Apply Filters
     filtered_df = df.copy()
     if selected_am != "All AMs": filtered_df = filtered_df[filtered_df['AM Names'] == selected_am]
     if selected_status != "All Statuses": filtered_df = filtered_df[filtered_df['Account_Status'] == selected_status]
@@ -225,17 +259,14 @@ if st.session_state.master_df is not None:
         mask = filtered_df['Company'].str.lower().str.contains(query, na=False) | filtered_df['Buyer'].str.lower().str.contains(query, na=False)
         filtered_df = filtered_df[mask]
         
-    # Unique accounts base for structural calculations
     unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
     
     st.divider()
 
-    # 2. Executive KPIs (Top Row)
     tot_fac = unique_accts['Facility Size'].sum()
     tot_out = unique_accts['Outstanding Balance'].sum()
     glob_util = (tot_out / tot_fac * 100) if tot_fac > 0 else 0
     
-    # Repayment dedup sum
     month_df = filtered_df[filtered_df['In Current Month'] == True].copy()
     unique_repayments = month_df.drop_duplicates(subset=['Buyer_Clean', 'Settle_Date_Clean'])
     tot_repay = unique_repayments['Deduplicated Repayment'].sum()
@@ -248,7 +279,6 @@ if st.session_state.master_df is not None:
     
     st.divider()
 
-    # 3. Portfolio & Risk (Middle Row 1)
     c1, c2 = st.columns([6, 4])
     with c1:
         st.markdown("#### 🌍 Portfolio Concentration")
@@ -267,7 +297,7 @@ if st.session_state.master_df is not None:
         
     with c2:
         st.markdown("#### ⚠️ Risk Matrix (Facility vs Outstanding)")
-        max_val = max(unique_accts['Facility Size'].max(), unique_accts['Outstanding Balance'].max())
+        max_val = max(unique_accts['Facility Size'].max(), unique_accts['Outstanding Balance'].max()) if not unique_accts.empty else 100
         fig_scatter = px.scatter(
             unique_accts, x="Facility Size", y="Outstanding Balance", 
             color="180-Day Alert", 
@@ -275,13 +305,13 @@ if st.session_state.master_df is not None:
             hover_name="Buyer_Clean", hover_data=["AM Names", "Utilisation %"],
             title="Red dots indicate 180-Day Disbursement Alerts"
         )
-        fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="black", dash="dash"))
+        if max_val > 0:
+            fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="black", dash="dash"))
         fig_scatter.update_layout(margin = dict(t=30, l=10, r=10, b=10))
         st.plotly_chart(fig_scatter, use_container_width=True)
 
     st.divider()
 
-    # 4. Trends & Leaderboard (Middle Row 2)
     c3, c4 = st.columns(2)
     with c3:
         st.markdown("#### 💵 Daily Collections Trend (Present Month)")
@@ -317,7 +347,6 @@ if st.session_state.master_df is not None:
 
     st.divider()
 
-    # 5. Master Data Table (Bottom Row)
     st.markdown("### 📋 Unified Master Data")
     st.write("All flags and logics (180-Day, Present Month, Low Utilisation) are pre-calculated and merged into this unified table.")
     
@@ -328,7 +357,6 @@ if st.session_state.master_df is not None:
         'Deduplicated Repayment', 'Invoice Flags'
     ]
     
-    # Format dates nicely for the table if possible
     table_df = filtered_df[display_cols].copy()
     for date_col in ['Due Date of Invoice', 'Settlement Date']:
         table_df[date_col] = table_df[date_col].dt.strftime('%Y-%m-%d').fillna('')
@@ -336,10 +364,9 @@ if st.session_state.master_df is not None:
     st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 else:
-    # Beautiful Empty State
     st.markdown("""
         <div style="text-align: center; padding: 50px;">
             <h1 style="color: #008080;">Welcome to AM Portfolio Intelligence</h1>
-            <p style="color: #666; font-size: 18px;">To see the dashboard in action, please <b>Load Sample Data</b> or <b>Upload your files</b> using the sidebar on the left.</p>
+            <p style="color: #666; font-size: 18px;">To see the dashboard in action, please <b>Load Sample Data</b> or <b>Upload your 3 Excel files</b> using the sidebar on the left.</p>
         </div>
     """, unsafe_allow_html=True)
