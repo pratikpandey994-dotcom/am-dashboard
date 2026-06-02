@@ -119,6 +119,20 @@ def map_and_merge(dfs_list):
         df = raw_df.copy()
         df.columns = [str(c).strip().lower() for c in df.columns]
         df = df.rename(columns=col_mapping)
+        
+        # Safely resolve duplicated column names by combining them (prioritizing non-nulls)
+        if df.columns.duplicated().any():
+            new_df = pd.DataFrame()
+            for col in df.columns.unique():
+                if isinstance(df[col], pd.DataFrame):
+                    s = df[col].iloc[:, 0]
+                    for j in range(1, df[col].shape[1]):
+                        s = s.combine_first(df[col].iloc[:, j])
+                    new_df[col] = s
+                else:
+                    new_df[col] = df[col]
+            df = new_df
+            
         mapped_dfs.append(df)
         
     if len(mapped_dfs) == 1:
