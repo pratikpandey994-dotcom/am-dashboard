@@ -1,409 +1,326 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from fuzzywuzzy import process
 from datetime import datetime
+import io
 
-# Set page config
-st.set_page_config(page_title="Smart Analytics Dashboard", layout="wide")
+st.set_page_config(page_title="AM Portfolio Dashboard", layout="wide", page_icon="📊")
+
+# --- CONSTANTS & CONFIG ---
+VALID_STATUSES = [
+    'Workable-Active',
+    'Workable-Inactive (AM)',
+    'Workable-Temporarily Suspended',
+    'Team Direct'
+]
+
+REQUIRED_COLS = [
+    'Buyer', 'Account_Status', 'AM Names', 'Company', 'Outstanding Balance',
+    'Facility Size', 'Due Date of Invoice', 'Settlement Date', 'AM',
+    'Payment Total USD', 'Last Disbursed Date'
+]
+
+# Custom CSS for minor styling (optional but clean)
+st.markdown("""
+    <style>
+    .metric-card {
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        border: 1px solid #e9ecef;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- UTILITY FUNCTIONS ---
-
-def dynamic_map_columns(df):
-    """Fuzzy match columns to standard business terms."""
-    cols = df.columns.tolist()
-    mapping = {}
-    
-    # Expanded candidates explicitly splitting Limit, Utilization, and Dates
-    candidates = {
-        "AM": ["am_name", "owner", "account_manager", "rm_name", "relationship_manager", "assigned_to", "am_email"],
-        "Account": ["company", "buyer", "seller", "account_name", "client", "customer"],
-        "Limit": ["facility_size", "limit", "approved_limit", "overdraft_limit", "max_balance"],
-        "Utilization": ["outstanding_balance", "outstanding", "utilization", "total advanced"],
-        "Revenue": ["realised revenue", "booked_revenue", "revenue", "mrr", "arr", "total_fees", "amount", "sales"],
-        "Status": ["utilization_status", "status", "stage", "state"],
-        "DPD": ["dpd", "overdue_days", "days_past_due"],
-        "TransactionDate": ["last_disbursed_date", "disbursed_date", "invoice date", "created date", "date", "updated date"]
-    }
-    
-    for key, choices in candidates.items():
-        matches = []
-        for choice in choices:
-            match, score = process.extractOne(choice, cols)
-            if score > 85: # High confidence threshold
-                if key == "AM" and "name" in match.lower():
-                    matches.insert(0, match) # Put name at the front
-                else:
-                    matches.append(match)
-        
-        if matches:
-            if key == "AM":
-                names = [m for m in matches if "name" in m.lower() or "manager" in m.lower() or "owner" in m.lower()]
-                mapping[key] = [names[0]] if names else [matches[0]]
-            else:
-                mapping[key] = [matches[0]]
-            
-    return mapping
-
 @st.cache_data
-def load_data(file):
-    """Safely load CSV or Excel data and strip whitespace from headers."""
-    filename = file.name.lower()
+def load_and_merge_data(single_file, master_file, view1_file, view2_file):
+    """Parses and merges uploaded Excel/CSV files based on the input mode."""
     try:
-        if filename.endswith('.csv'):
-            df = pd.read_csv(file)
+        if single_file is not None:
+            df = parse_file(single_file)
+        elif master_file and view1_file and view2_file:
+            df_master = parse_file(master_file)
+            df_v1 = parse_file(view1_file)
+            df_v2 = parse_file(view2_file)
+            
+            # Use Buyer as primary join key, fallback to Company if needed. 
+            # In Pandas, doing a clean merge is best.
+            # Assuming Buyer is the unique identifier across sheets.
+            df = pd.merge(df_master, df_v1, on='Buyer', how='outer', suffixes=('', '_drop1'))
+            df = pd.merge(df, df_v2, on='Buyer', how='outer', suffixes=('', '_drop2'))
+            
+            # Clean up duplicate columns from merges
+            df = df.loc[:, ~df.columns.str.endswith('_drop1')]
+            df = df.loc[:, ~df.columns.str.endswith('_drop2')]
         else:
-            df = pd.read_excel(file)
-        # Clean column names
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
+            return None
+        
+        return process_data(df)
     except Exception as e:
+        st.error(f"Error processing files: {str(e)}")
         return None
+
+def parse_file(file):
+    if file.name.lower().endswith('.csv'):
+        return pd.read_csv(file)
+    return pd.read_excel(file)
+
+def process_data(df):
+    """Cleans data and calculates derived columns."""
+    # Ensure all required columns exist, fill missing with NaN
+    for col in REQUIRED_COLS:
+        if col not in df.columns:
+            df[col] = pd.NA
+            
+    # Filter valid statuses
+    df = df[df['Account_Status'].isin(VALID_STATUSES)].copy()
+    
+    # Coerce numerics
+    df['Outstanding Balance'] = pd.to_numeric(df['Outstanding Balance'], errors='coerce').fillna(0)
+    df['Facility Size'] = pd.to_numeric(df['Facility Size'], errors='coerce').fillna(0)
+    df['Payment Total USD'] = pd.to_numeric(df['Payment Total USD'], errors='coerce').fillna(0)
+    
+    # Coerce dates
+    df['Last Disbursed Date'] = pd.to_datetime(df['Last Disbursed Date'], errors='coerce')
+    df['Due Date of Invoice'] = pd.to_datetime(df['Due Date of Invoice'], errors='coerce')
+    df['Settlement Date'] = pd.to_datetime(df['Settlement Date'], errors='coerce')
+    
+    # AM Names logic
+    df['AM Names'] = df['AM Names'].combine_first(df['AM'])
+    df['AM Names'] = df['AM Names'].fillna('Unassigned')
+    df.loc[df['Buyer'].isna() | (df['Buyer'] == ''), 'AM Names'] = 'Unassigned'
+    
+    # Utilisation %
+    df['Utilisation %'] = (df['Outstanding Balance'] / df['Facility Size'].replace(0, pd.NA)) * 100
+    df['Utilisation %'] = df['Utilisation %'].fillna(0)
+    
+    # 180-Day Alert
+    now = pd.Timestamp.now()
+    df['Days Since Disbursed'] = (now - df['Last Disbursed Date']).dt.days
+    df['180-Day Alert'] = df['Days Since Disbursed'].apply(lambda x: 'YES' if pd.notna(x) and x > 180 else 'NO')
+    
+    # Present Month Rule
+    curr_month = now.month
+    curr_year = now.year
+    df['In Current Month'] = False
+    
+    mask_due = (df['Due Date of Invoice'].dt.month == curr_month) & (df['Due Date of Invoice'].dt.year == curr_year)
+    mask_settle = (df['Settlement Date'].dt.month == curr_month) & (df['Settlement Date'].dt.year == curr_year)
+    df.loc[mask_due | mask_settle, 'In Current Month'] = True
+
+    # Deduplicated Repayment
+    # Group by Buyer and Settlement Date to sum Payment Total USD
+    # To assign back to df without duplicating, we transform
+    df['Buyer_Clean'] = df['Buyer'].fillna('Unknown')
+    df['Settle_Date_Clean'] = df['Settlement Date'].dt.date.fillna('None')
+    
+    # Calculate dedup sum
+    dedup_sum = df[df['Payment Total USD'] > 0].groupby(['Buyer_Clean', 'Settle_Date_Clean'])['Payment Total USD'].sum().reset_index()
+    dedup_sum.rename(columns={'Payment Total USD': 'Deduplicated Repayment'}, inplace=True)
+    
+    df = pd.merge(df, dedup_sum, on=['Buyer_Clean', 'Settle_Date_Clean'], how='left')
+    df['Deduplicated Repayment'] = df['Deduplicated Repayment'].fillna(0)
+    
+    return df
 
 # --- UI LAYOUT ---
 
-st.title("📊 Smart Analytics Dashboard")
-st.markdown("Upload **any** Excel or CSV files to analyze Account Limits, Utilization, and Risk.")
+st.title("📊 AM Portfolio Dashboard")
 
-# Initialize session state for stored datasets
-if 'datasets' not in st.session_state:
-    st.session_state.datasets = {}
-
+# Sidebar - Data Upload
 with st.sidebar:
-    st.header("Data Source")
-    uploaded_files = st.file_uploader("Upload Data Files", type=["xlsx", "xls", "csv"], accept_multiple_files=True)
+    st.header("Data Upload")
+    upload_mode = st.radio("Upload Mode", ["Single Combined Sheet", "Three Separate Sheets"])
     
-    # Process uploaded files
-    if uploaded_files:
-        for file in uploaded_files:
-            # Only load if not already in session state or if modified
-            if file.name not in st.session_state.datasets:
-                with st.spinner(f"Loading {file.name}..."):
-                    loaded_df = load_data(file)
-                    if loaded_df is not None and not loaded_df.empty:
-                        st.session_state.datasets[file.name] = loaded_df
-
-    # Allow user to select which dataset to view if multiple are loaded
-    selected_dataset = None
-    if st.session_state.datasets:
-        st.divider()
-        st.subheader("Select Dataset to Analyze")
-        dataset_names = list(st.session_state.datasets.keys())
-        selected_dataset = st.selectbox("Active Dataset", dataset_names)
-        
-        # Optional: Clear data
-        if st.button("Clear All Data"):
-            st.session_state.datasets = {}
-            st.rerun()
-
-if selected_dataset and selected_dataset in st.session_state.datasets:
-    df = st.session_state.datasets[selected_dataset]
-    mapping = dynamic_map_columns(df)
-        
-    # --- TABBED INTERFACE ---
-    tab1, tab2, tab3 = st.tabs(["🎯 Portfolio Intelligence", "🔍 Smart Auto-Discovery", "📋 Raw Data"])
+    single_file = None
+    master_file = None
+    view1_file = None
+    view2_file = None
     
-    # TAB 1: Advanced Business Logic focusing on categorization and action
+    if upload_mode == "Single Combined Sheet":
+        single_file = st.file_uploader("Upload Combined Data (Excel/CSV)", type=["xlsx", "csv"])
+    else:
+        master_file = st.file_uploader("1. Masterdata", type=["xlsx", "csv"])
+        view1_file = st.file_uploader("2. View 1", type=["xlsx", "csv"])
+        view2_file = st.file_uploader("3. View 2", type=["xlsx", "csv"])
+        
+    process_btn = st.button("Process Data", type="primary", use_container_width=True)
+
+# Process logic
+if 'master_df' not in st.session_state:
+    st.session_state.master_df = None
+
+if process_btn:
+    with st.spinner("Processing data..."):
+        df = load_and_merge_data(single_file, master_file, view1_file, view2_file)
+        if df is not None:
+            st.session_state.master_df = df
+            st.success("Data successfully processed!")
+
+if st.session_state.master_df is not None:
+    df = st.session_state.master_df
+    
+    # Global Filters (Top Bar)
+    st.markdown("### Global Filters")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        am_options = ["All AMs"] + sorted(list(df['AM Names'].dropna().unique()))
+        selected_am = st.selectbox("AM Name", am_options)
+        
+    with col2:
+        status_options = ["All Statuses"] + sorted(list(df['Account_Status'].dropna().unique()))
+        selected_status = st.selectbox("Account Status", status_options)
+        
+    with col3:
+        search_query = st.text_input("Search Company or Buyer", placeholder="Type to search...")
+        
+    # Apply Global Filters
+    filtered_df = df.copy()
+    if selected_am != "All AMs":
+        filtered_df = filtered_df[filtered_df['AM Names'] == selected_am]
+    if selected_status != "All Statuses":
+        filtered_df = filtered_df[filtered_df['Account_Status'] == selected_status]
+    if search_query:
+        query = search_query.lower()
+        mask = filtered_df['Company'].str.lower().str.contains(query, na=False) | \
+               filtered_df['Buyer'].str.lower().str.contains(query, na=False)
+        filtered_df = filtered_df[mask]
+        
+    st.divider()
+    
+    # TABS
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Overview", 
+        "💵 Invoices & Repayments", 
+        "💤 Workable Inactive", 
+        "🏆 Top 15 Accounts", 
+        "👑 Leadership Direct"
+    ])
+    
+    # --- TAB 1: OVERVIEW ---
     with tab1:
-        st.markdown("### Intelligent Portfolio Overview")
-        if not mapping:
-            st.info("Could not auto-detect standard business columns (AM, Account, Limit, Utilization). Try the 'Smart Auto-Discovery' tab!")
-        else:
-            # Setup Filter
-            plot_df = df.copy()
-            selected_am = "All"
-            if "AM" in mapping:
-                am_col = mapping["AM"][0]
-                am_list = ["All"] + sorted([str(x) for x in df[am_col].dropna().unique()])
-                selected_am = st.selectbox("Filter by Account Manager", am_list)
-                if selected_am != "All":
-                    plot_df = plot_df[plot_df[am_col].astype(str) == selected_am]
-
-            # Pre-calculate numerics safely
-            if "Limit" in mapping:
-                plot_df[mapping["Limit"][0]] = pd.to_numeric(plot_df[mapping["Limit"][0]], errors='coerce').fillna(0)
-            if "Utilization" in mapping:
-                plot_df[mapping["Utilization"][0]] = pd.to_numeric(plot_df[mapping["Utilization"][0]], errors='coerce').fillna(0)
+        st.subheader("Overview / Masterdata Handover")
+        
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.dataframe(
+                filtered_df[['Company', 'Buyer', 'Account_Status', 'AM Names', 'Outstanding Balance', 'Facility Size', 'Utilisation %', '180-Day Alert']],
+                use_container_width=True,
+                hide_index=True
+            )
             
-            # --- CALCULATE ADVANCED METRICS ---
+        with c2:
+            st.markdown("#### Utilisation Distribution")
+            # Categorize
+            def cat_util(u):
+                if u >= 70: return 'High (≥70%)'
+                elif u >= 50: return 'Medium (50-69%)'
+                else: return 'Low (<50%)'
             
-            acc_col = mapping.get("Account", [None])[0]
-            lim_col = mapping.get("Limit", [None])[0]
-            util_col = mapping.get("Utilization", [None])[0]
-            stat_col = mapping.get("Status", [None])[0]
-            date_col = mapping.get("TransactionDate", [None])[0]
-            dpd_col = mapping.get("DPD", [None])[0]
+            util_series = filtered_df['Utilisation %'].apply(cat_util)
+            counts = util_series.value_counts().reset_index()
+            counts.columns = ['Category', 'Count']
             
-            if acc_col and lim_col and util_col:
-                # Aggregate at account level to avoid duplicate metric calculations
-                account_df = plot_df.groupby(acc_col).agg(
-                    Total_Limit=(lim_col, 'sum'),
-                    Total_Utilization=(util_col, 'sum')
-                ).reset_index()
-                
-                # Calculate Utilization Percentage Category
-                # Avoid division by zero
-                account_df['Total_Limit_Safe'] = account_df['Total_Limit'].replace(0, pd.NA)
-                account_df['Utilization_Pct'] = (account_df['Total_Utilization'] / account_df['Total_Limit_Safe']) * 100
-                account_df['Utilization_Pct'] = account_df['Utilization_Pct'].fillna(0)
-                
-                # UPDATED RULES: Low < 20%, Medium 20-70%, High > 70%
-                def categorize_util(pct):
-                    if pct > 70: return 'High (>70%)'
-                    elif pct >= 20: return 'Medium (20-70%)'
-                    else: return 'Low (<20%)'
-                    
-                account_df['Utilization_Category'] = account_df['Utilization_Pct'].apply(categorize_util)
-                
-                # Merge Status if available
-                if stat_col:
-                    # Get the most common status per account
-                    status_df = plot_df.groupby(acc_col)[stat_col].agg(lambda x: x.mode()[0] if not x.mode().empty else 'Unknown').reset_index()
-                    account_df = account_df.merge(status_df, on=acc_col, how='left')
-                else:
-                    account_df[stat_col] = 'Unknown'
-                    
-                # Calculate Inactivity if Date is available
-                if date_col:
-                    plot_df[date_col] = pd.to_datetime(plot_df[date_col], errors='coerce')
-                    date_df = plot_df.groupby(acc_col)[date_col].max().reset_index()
-                    date_df.rename(columns={date_col: 'Last_Transaction'}, inplace=True)
-                    account_df = account_df.merge(date_df, on=acc_col, how='left')
-                    
-                    # Assuming today is the max date in the dataset to simulate real-time accurately
-                    current_date = plot_df[date_col].max() if not pd.isna(plot_df[date_col].max()) else pd.Timestamp.now()
-                    account_df['Days_Inactive'] = (current_date - account_df['Last_Transaction']).dt.days
-                    
-                    def categorize_inactivity(days):
-                        if pd.isna(days): return 'Unknown'
-                        if days > 60: return 'Inactive (>60 days)'
-                        elif days > 30: return 'Dormant (30-60 days)'
-                        else: return 'Active (<30 days)'
-                        
-                    account_df['Activity_Status'] = account_df['Days_Inactive'].apply(categorize_inactivity)
-                else:
-                    account_df['Last_Transaction'] = 'N/A'
-                    account_df['Activity_Status'] = 'Unknown'
-                    account_df['Days_Inactive'] = 0
+            fig_util = px.pie(counts, names='Category', values='Count', hole=0.5,
+                              color='Category',
+                              color_discrete_map={'High (≥70%)':'#e53e3e', 'Medium (50-69%)':'#dd6b20', 'Low (<50%)':'#38a169'})
+            st.plotly_chart(fig_util, use_container_width=True)
 
-                # Calculate "Action Required" Logic based on new thresholds
-                def needs_action(row):
-                    reasons = []
-                    if row.get('Utilization_Pct', 0) < 20:
-                        reasons.append("Low Utilization (<20%)")
-                    if str(row.get(stat_col, '')).lower() in ['suspended', 'overdue']:
-                        reasons.append("Account Suspended/Overdue")
-                    if row.get('Days_Inactive', 0) > 60:
-                        reasons.append("Inactive (>60 days)")
-                    return " | ".join(reasons) if reasons else "Healthy"
-                
-                account_df['Action_Required'] = account_df.apply(needs_action, axis=1)
-                
-                # --- RENDER DASHBOARD ---
-                
-                # Top KPIs
-                total_accounts = len(account_df)
-                action_accounts = len(account_df[account_df['Action_Required'] != 'Healthy'])
-                low_util_count = len(account_df[account_df['Utilization_Category'] == 'Low (<20%)'])
-                inactive_count = len(account_df[account_df['Activity_Status'] == 'Inactive (>60 days)'])
-
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Total Accounts", total_accounts)
-                k2.metric("Requires Action ⚠️", action_accounts, delta_color="inverse")
-                k3.metric("Low Utilization Accounts", low_util_count)
-                k4.metric("Inactive Accounts (>60d)", inactive_count)
-                
-                st.divider()
-                
-                # Visualizations Row 1
-                c1, c2 = st.columns(2)
-                
-                with c1:
-                    st.subheader("Utilization Categories")
-                    util_counts = account_df['Utilization_Category'].value_counts().reset_index()
-                    util_counts.columns = ['Category', 'Count']
-                    # Sort for consistent display
-                    order = ['High (>70%)', 'Medium (20-70%)', 'Low (<20%)']
-                    util_counts['Category'] = pd.Categorical(util_counts['Category'], categories=order, ordered=True)
-                    util_counts = util_counts.sort_values('Category')
-                    
-                    fig1 = px.bar(util_counts, x='Count', y='Category', orientation='h',
-                                  color='Category', 
-                                  color_discrete_map={'High (>70%)':'#2ca02c', 'Medium (20-70%)':'#ff7f0e', 'Low (<20%)':'#d62728'},
-                                  text='Count')
-                    fig1.update_traces(textposition='inside', marker_line_color='white', marker_line_width=1.5)
-                    fig1.update_layout(showlegend=False, margin=dict(t=10, b=0, l=0, r=0), yaxis_title=None, xaxis_title="Number of Accounts")
-                    # Make chart interactive
-                    util_event = st.plotly_chart(fig1, use_container_width=True, on_select="rerun", selection_mode="points", key="util_bar")
-
-                with c2:
-                    st.subheader("Activity Status")
-                    act_counts = account_df['Activity_Status'].value_counts().reset_index()
-                    act_counts.columns = ['Status', 'Count']
-                    
-                    fig2 = px.bar(act_counts, x='Count', y='Status', orientation='h',
-                                  color='Status',
-                                  color_discrete_map={'Inactive (>60 days)':'#7f7f7f', 'Dormant (30-60 days)':'#ffbb78', 'Active (<30 days)':'#98df8a', 'Unknown':'#c7c7c7'},
-                                  text='Count')
-                    fig2.update_traces(textposition='inside', marker_line_color='white', marker_line_width=1.5)
-                    fig2.update_layout(showlegend=False, margin=dict(t=10, b=0, l=0, r=0), yaxis_title=None, xaxis_title="Number of Accounts")
-                    # Make chart interactive
-                    act_event = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", selection_mode="points", key="act_bar")
-
-                st.divider()
-
-                # --- INTERACTIVE ACCOUNT EXPLORER ---
-                st.subheader("📂 Interactive Account Explorer")
-                st.write("Click on any bar in the charts above to filter the accounts below. If no bar is selected, all accounts are shown.")
-
-                # Extract selections from events
-                selected_utils = []
-                if util_event and "selection" in util_event and "points" in util_event["selection"]:
-                    for p in util_event["selection"]["points"]:
-                        if "y" in p:
-                            selected_utils.append(p["y"])
-
-                selected_acts = []
-                if act_event and "selection" in act_event and "points" in act_event["selection"]:
-                    for p in act_event["selection"]["points"]:
-                        if "y" in p:
-                            selected_acts.append(p["y"])                    
-                # Also keep the "Requires Action" toggle just in case
-                action_filter = st.selectbox("Quick Filter:", ["Show All Accounts", "⚠️ Requires Action Only", "✅ Healthy Only"], index=0)
-                
-                # Apply Filters
-                filtered_df = account_df.copy()
-                
-                # Apply pie chart filters
-                if selected_utils:
-                    filtered_df = filtered_df[filtered_df['Utilization_Category'].isin(selected_utils)]
-                if selected_acts:
-                    filtered_df = filtered_df[filtered_df['Activity_Status'].isin(selected_acts)]
-                    
-                # Apply action filter
-                if action_filter == "⚠️ Requires Action Only":
-                    filtered_df = filtered_df[filtered_df['Action_Required'] != 'Healthy']
-                elif action_filter == "✅ Healthy Only":
-                    filtered_df = filtered_df[filtered_df['Action_Required'] == 'Healthy']
-
-                if not filtered_df.empty:
-                    display_cols = [acc_col, 'Total_Limit', 'Total_Utilization', 'Utilization_Pct', 'Utilization_Category', 'Activity_Status', 'Action_Required']
-                    if stat_col: display_cols.append(stat_col)
-                    
-                    # Format the percentage for better display
-                    display_df = filtered_df[display_cols].sort_values(by='Utilization_Pct', ascending=False)
-                    st.dataframe(display_df, use_container_width=True)
-                    st.caption(f"Showing {len(display_df)} accounts based on your selection.")
-                else:
-                    st.info("No accounts match the selected categories.")
-                    
-            else:
-                st.warning("Insufficient data mapped to perform advanced logic. Need Account, Limit, and Utilization.")
-
-    # TAB 2: Generalized "Any Data" Analysis
+    # --- TAB 2: INVOICES & REPAYMENTS ---
     with tab2:
-        st.markdown("### Smart Auto-Discovery")
-        st.write("Automatically analyze and visualize the relationships in your dataset.")
+        st.subheader("Invoices & Repayments (Current Month)")
         
-        # Detect data types
-        num_cols = df.select_dtypes(include='number').columns.tolist()
-        cat_cols = df.select_dtypes(exclude=['number', 'datetime']).columns.tolist()
+        month_df = filtered_df[filtered_df['In Current Month'] == True].copy()
         
-        if num_cols and cat_cols:
-            # Layout for controls
-            st.markdown("#### ⚙️ Data Configuration")
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                cat_choice = st.selectbox("Group By (Category)", cat_cols)
-            with col_b:
-                num_choice = st.selectbox("Measure (Metric)", num_cols)
-            with col_c:
-                agg_method = st.selectbox("Aggregation Method", ["Sum", "Average", "Count", "Max", "Min"])
-                
-            # Layout for visual controls
-            v1, v2, v3 = st.columns(3)
-            with v1:
-                chart_type = st.selectbox("Chart Type", ["Bar Chart", "Donut Chart", "Line Chart", "Scatter Plot"])
-            with v2:
-                top_n = st.selectbox("Show Top N Results", [10, 15, 25, 50, "All"])
-            with v3:
-                sort_order = st.selectbox("Sort Order", ["Descending", "Ascending"])
-
-            # Perform Aggregation
-            if agg_method == "Sum":
-                agg_df = df.groupby(cat_choice)[num_choice].sum().reset_index()
-            elif agg_method == "Average":
-                agg_df = df.groupby(cat_choice)[num_choice].mean().reset_index()
-            elif agg_method == "Count":
-                agg_df = df.groupby(cat_choice)[num_choice].count().reset_index()
-            elif agg_method == "Max":
-                agg_df = df.groupby(cat_choice)[num_choice].max().reset_index()
-            elif agg_method == "Min":
-                agg_df = df.groupby(cat_choice)[num_choice].min().reset_index()
-
-            # Dynamic Number Formatter
-            def format_num(num):
-                if pd.isna(num): return "0"
-                if abs(num) >= 1e9: return f"{num/1e9:.2f}B"
-                elif abs(num) >= 1e6: return f"{num/1e6:.2f}M"
-                elif abs(num) >= 1e3: return f"{num/1e3:.2f}K"
-                else: return f"{num:,.2f}"
-
-            # Calculate top level summary KPIs
-            total_metric = agg_df[num_choice].sum()
-            avg_metric = agg_df[num_choice].mean()
-            max_metric = agg_df[num_choice].max()
+        # Calculate Total Repayments (deduplicated)
+        # We drop duplicate Buyer+SettleDate to sum the deduplicated amounts
+        unique_repayments = month_df.drop_duplicates(subset=['Buyer_Clean', 'Settle_Date_Clean'])
+        total_repayments = unique_repayments['Deduplicated Repayment'].sum()
+        
+        st.metric("Total Repayments (Current Month)", f"${total_repayments:,.2f}")
+        
+        # Determine Flags
+        def get_invoice_flags(row):
+            flags = []
+            if pd.isna(row['Settlement Date']):
+                flags.append("Collect Amount")
             
-            st.divider()
+            # Low Utilisation Post-Repayment
+            if row['Facility Size'] > 0:
+                post_util = (row['Outstanding Balance'] - row['Deduplicated Repayment']) / row['Facility Size']
+                if post_util < 0.5:
+                    flags.append("Low Util Post-Repay")
+            return ", ".join(flags)
             
-            # Show KPIs
-            k1, k2, k3 = st.columns(3)
-            k1.metric(f"Total {num_choice}", format_num(total_metric))
-            k2.metric(f"Avg {num_choice} per {cat_choice}", format_num(avg_metric))
-            k3.metric(f"Max {num_choice}", format_num(max_metric))
-            
-            st.divider()
+        month_df['Flags'] = month_df.apply(get_invoice_flags, axis=1)
+        
+        # Avoid showing the same deduplicated repayment row multiple times unnecessarily,
+        # but since we might have multiple due dates, we show unique rows.
+        # Clean display cols
+        display_month = month_df[['Buyer', 'Company', 'AM Names', 'Due Date of Invoice', 'Settlement Date', 'Deduplicated Repayment', 'Flags']]
+        display_month = display_month.drop_duplicates()
+        
+        st.dataframe(display_month, use_container_width=True, hide_index=True)
 
-            # Title
-            title_text = f"Top {top_n} {cat_choice} by {agg_method} of {num_choice}" if top_n != "All" else f"All {cat_choice} by {agg_method} of {num_choice}"
-            st.subheader(title_text)
-
-            # Sorting and Limiting (always take top magnitude first for 'descending' logic)
-            if top_n != "All":
-                agg_df = agg_df.nlargest(top_n, num_choice)
-                
-            is_ascending = (sort_order == "Ascending")
-            agg_df = agg_df.sort_values(by=num_choice, ascending=is_ascending)
-
-            # Draw Chart
-            if chart_type == "Bar Chart":
-                fig_auto = px.bar(agg_df, x=cat_choice, y=num_choice, color=num_choice, color_continuous_scale="Blues", text_auto='.2s')
-                fig_auto.update_layout(xaxis_tickangle=-45)
-            elif chart_type == "Donut Chart":
-                fig_auto = px.pie(agg_df, names=cat_choice, values=num_choice, hole=0.4)
-                fig_auto.update_traces(textposition='inside', textinfo='percent+label')
-            elif chart_type == "Line Chart":
-                fig_auto = px.line(agg_df, x=cat_choice, y=num_choice, markers=True)
-                fig_auto.update_layout(xaxis_tickangle=-45)
-            elif chart_type == "Scatter Plot":
-                # Ensure size doesn't fail on negative values (e.g. negative DPD)
-                safe_size = agg_df[num_choice].apply(lambda x: max(x, 0))
-                fig_auto = px.scatter(agg_df, x=cat_choice, y=num_choice, size=safe_size, color=num_choice, color_continuous_scale="Blues")
-                fig_auto.update_layout(xaxis_tickangle=-45)
-                
-            st.plotly_chart(fig_auto, use_container_width=True)
-            
-            with st.expander("Show Data Table"):
-                # Use st.dataframe with pandas styling for formatting
-                st.dataframe(agg_df.style.format({num_choice: "{:,.2f}"}), use_container_width=True)
-
-        else:
-            st.info("The dataset needs at least one numeric and one text column to auto-generate charts.")
-
-    # TAB 3: Raw Profile
+    # --- TAB 3: WORKABLE INACTIVE AM ---
     with tab3:
-        st.markdown("### Raw Data Profile")
-        st.dataframe(df, use_container_width=True)
+        st.subheader("Workable Inactive AM")
+        
+        inactive_df = filtered_df[filtered_df['Account_Status'] == 'Workable-Inactive (AM)'].copy()
+        
+        i1, i2, i3 = st.columns(3)
+        i1.metric("Inactive Accounts", len(inactive_df))
+        i2.metric("Total Outstanding Balance", f"${inactive_df['Outstanding Balance'].sum():,.2f}")
+        i3.metric("Total Facility Size", f"${inactive_df['Facility Size'].sum():,.2f}")
+        
+        st.dataframe(
+            inactive_df[['Buyer', 'Company', 'AM Names', 'Outstanding Balance', 'Facility Size']],
+            use_container_width=True, hide_index=True
+        )
+
+    # --- TAB 4: TOP 15 ACCOUNTS ---
+    with tab4:
+        st.subheader("Top 15 Accounts (by Facility Size)")
+        
+        top15 = filtered_df.sort_values(by='Facility Size', ascending=False).head(15).copy()
+        top15['Rank'] = range(1, len(top15) + 1)
+        
+        t1, t2 = st.columns([1, 1])
+        with t1:
+            st.dataframe(
+                top15[['Rank', 'Buyer', 'Company', 'Facility Size', 'Outstanding Balance', 'Utilisation %', 'AM Names']],
+                use_container_width=True, hide_index=True
+            )
+            
+        with t2:
+            if not top15.empty:
+                # Melt for grouped bar chart
+                melted = top15.melt(id_vars=['Buyer'], value_vars=['Facility Size', 'Outstanding Balance'], var_name='Metric', value_name='Amount')
+                fig_top15 = px.bar(melted, x='Amount', y='Buyer', color='Metric', orientation='h', barmode='group')
+                fig_top15.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_top15, use_container_width=True)
+
+    # --- TAB 5: LEADERSHIP DIRECT ---
+    with tab5:
+        st.subheader("Leadership Direct (Top 50)")
+        
+        direct_df = filtered_df[filtered_df['Account_Status'] == 'Team Direct'].copy()
+        top50 = direct_df.sort_values(by='Facility Size', ascending=False).head(50).copy()
+        top50['Rank'] = range(1, len(top50) + 1)
+        
+        l1, l2 = st.columns([1, 1])
+        with l1:
+            st.dataframe(
+                top50[['Rank', 'Buyer', 'Company', 'Facility Size', 'Utilisation %']],
+                use_container_width=True, hide_index=True
+            )
+            
+        with l2:
+            if not top50.empty:
+                fig_lead = px.pie(top50.head(10), names='Buyer', values='Facility Size', hole=0.4, title="Top 10 Direct Distribution")
+                st.plotly_chart(fig_lead, use_container_width=True)
 else:
-    st.info("Waiting for file upload. Use the sidebar to upload a CSV or Excel file.")
+    st.info("👈 Please upload your data files in the sidebar and click 'Process Data'.")
