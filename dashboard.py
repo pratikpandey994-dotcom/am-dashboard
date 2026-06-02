@@ -40,6 +40,9 @@ st.markdown("""
 
 def apply_business_logic(df):
     """Applies the Phase 3 business logic to a unified dataframe and splits into Portfolio & V2"""
+    missing_status = 'account_status' not in df.columns
+    missing_buyer = 'buyer' not in df.columns
+    
     # Ensure columns exist to prevent crashes on single sheets missing data
     required = ['buyer', 'account_status', 'am_names', 'facility_size', 'outstanding_balance', 
                 'last_disbursed_date', 'due_date_invoice', 'settlement_date', 'payment_total_usd', 'am_view2']
@@ -48,10 +51,17 @@ def apply_business_logic(df):
             df[col] = pd.NA
 
     # Clean Account Status
-    df['account_status'] = df['account_status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip().str.title()
-    df['account_status'] = df['account_status'].str.replace('(Am)', '(AM)', regex=False)
-    valid_statuses = ['Workable-Active', 'Workable-Inactive (AM)', 'Workable-Temporarily Suspended', 'Team Direct']
-    df = df[df['account_status'].isin(valid_statuses)].copy()
+    if missing_status:
+        df['account_status'] = 'Workable-Active' # Bypass filter if column wasn't in raw data
+    else:
+        df['account_status'] = df['account_status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip().str.title()
+        df['account_status'] = df['account_status'].str.replace('(Am)', '(AM)', regex=False)
+        valid_statuses = ['Workable-Active', 'Workable-Inactive (AM)', 'Workable-Temporarily Suspended', 'Team Direct']
+        df = df[df['account_status'].isin(valid_statuses)].copy()
+
+    if missing_buyer:
+        df['buyer'] = ['Unknown_Buyer_' + str(i) for i in range(len(df))]
+
 
     df['am_names'] = df['am_names'].fillna('Unassigned')
     df.loc[df['am_names'] == '', 'am_names'] = 'Unassigned'
