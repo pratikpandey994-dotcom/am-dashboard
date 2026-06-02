@@ -1,377 +1,263 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
 import numpy as np
+import plotly.express as px
 
-st.set_page_config(page_title="AM Portfolio Dashboard", layout="wide", page_icon="📊")
+st.set_page_config(page_title="AM Portfolio Intelligence", layout="wide", page_icon="📊")
 
-# --- CONSTANTS & CONFIG ---
-VALID_STATUSES = [
-    'Workable-Active',
-    'Workable-Inactive (AM)',
-    'Workable-Temporarily Suspended',
-    'Team Direct'
-]
+# --- Custom CSS for Aesthetics ---
+st.markdown("""
+<style>
+    .reportview-container .main .block-container{
+        padding-top: 2rem;
+    }
+    .metric-card {
+        background-color: #1E1E1E;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        border-left: 5px solid #00C4B4;
+    }
+    h1, h2, h3 {
+        color: #F0F2F6;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 4px 4px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-REQUIRED_COLS = [
-    'Buyer', 'Account_Status', 'AM Names', 'Company', 'Outstanding Balance',
-    'Facility Size', 'Due Date of Invoice', 'Settlement Date', 'AM',
-    'Payment Total USD', 'Last Disbursed Date'
-]
-
-# --- UTILITY FUNCTIONS ---
-def generate_sample_data():
-    """Generates a realistic dummy dataset for immediate testing."""
-    np.random.seed(42)
-    num_rows = 150
-    now = pd.Timestamp.now()
-    
-    buyers = [f"Buyer Corp {i}" for i in range(1, 51)]
-    companies = [f"Supplier Inc {i}" for i in range(1, 21)]
-    ams = ["Alice Johnson", "Bob Smith", "Charlie Davis", "Diana Prince", "Unassigned"]
-    
-    data = []
-    for _ in range(num_rows):
-        buyer = np.random.choice(buyers)
-        am = np.random.choice(ams)
-        fac_size = np.random.uniform(50000, 2000000)
-        out_bal = fac_size * np.random.uniform(0.1, 1.1)
-        
-        if np.random.random() < 0.2:
-            last_disb = now - timedelta(days=np.random.randint(181, 300))
-        else:
-            last_disb = now - timedelta(days=np.random.randint(5, 170))
-            
-        if np.random.random() < 0.3:
-            due_date = now + timedelta(days=np.random.randint(-15, 15))
-        else:
-            due_date = now - timedelta(days=np.random.randint(30, 365 * 3)) # Historical data
-            
-        settle_date = due_date if np.random.random() < 0.5 else pd.NaT
-        repay = out_bal * np.random.uniform(0.1, 0.5) if pd.notna(settle_date) else 0
-        
-        data.append({
-            'Buyer': buyer,
-            'Company': np.random.choice(companies),
-            'Account_Status': np.random.choice(VALID_STATUSES),
-            'AM Names': am,
-            'AM': am,
-            'Facility Size': fac_size,
-            'Outstanding Balance': out_bal,
-            'Last Disbursed Date': last_disb,
-            'Due Date of Invoice': due_date,
-            'Settlement Date': settle_date,
-            'Payment Total USD': repay
-        })
-        
-    return pd.DataFrame(data)
-
+# --- 1. DATA PROCESSING (PHASE 3 LOGIC) ---
 @st.cache_data
-def load_and_merge_data(single_file, master_file, view1_file, view2_file):
-    try:
-        if single_file is not None:
-            df = parse_file(single_file)
-            return process_data(df)
-        elif master_file and view1_file and view2_file:
-            df_master = parse_file(master_file)
-            df_v1 = parse_file(view1_file)
-            df_v2 = parse_file(view2_file)
-            
-            # --- MAPPING LOGIC ---
-            if 'Facility_Size' in df_master.columns: df_master = df_master.rename(columns={'Facility_Size': 'Facility Size'})
-            if 'OB' in df_master.columns: df_master = df_master.rename(columns={'OB': 'Master_OB'})
-            if 'AM' in df_master.columns: df_master = df_master.rename(columns={'AM': 'Master_AM'})
-            
-            # Clean Account Status rigorously
-            if 'Account_Status' in df_master.columns:
-                # Remove spaces around hyphens and title case it so "temporarily suspended" becomes "Temporarily Suspended"
-                df_master['Account_Status'] = df_master['Account_Status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip().str.title()
-                # Fix specific casing for (AM)
-                df_master['Account_Status'] = df_master['Account_Status'].str.replace('(Am)', '(AM)', regex=False)
-            
-            if 'company' in df_v1.columns: df_v1 = df_v1.rename(columns={'company': 'Buyer'})
-            if 'Outstanding_Balance' in df_v1.columns: df_v1 = df_v1.rename(columns={'Outstanding_Balance': 'View1_OB'})
-            if 'Last_Disbursed_Date' in df_v1.columns: df_v1 = df_v1.rename(columns={'Last_Disbursed_Date': 'Last Disbursed Date'})
-            if 'AM_Name' in df_v1.columns: df_v1 = df_v1.rename(columns={'AM_Name': 'View1_AM'})
-                
-            if 'due_date_of_invoice' in df_v2.columns: df_v2 = df_v2.rename(columns={'due_date_of_invoice': 'Due Date of Invoice'})
-            if 'settlement_date' in df_v2.columns: df_v2 = df_v2.rename(columns={'settlement_date': 'Settlement Date'})
-            if 'payment_total_usd' in df_v2.columns: df_v2 = df_v2.rename(columns={'payment_total_usd': 'Payment Total USD'})
-            
-            # Merge Master + View 1
-            df = pd.merge(df_master, df_v1, on='Buyer', how='outer', suffixes=('', '_drop1'))
-            
-            # Resolve combined columns (Prioritize View 1 for OB, Master for AM)
-            df['Outstanding Balance'] = df.get('View1_OB', pd.Series(dtype=float)).combine_first(df.get('Master_OB', pd.Series(dtype=float)))
-            df['AM Names'] = df.get('Master_AM', pd.Series(dtype=str)).combine_first(df.get('View1_AM', pd.Series(dtype=str)))
-            df['Company'] = df['Buyer'] 
-            
-            # Master/V1 + View 2
-            df = pd.merge(df, df_v2, on='Buyer', how='outer', suffixes=('', '_drop2'))
-            
-            df = df.loc[:, ~df.columns.str.endswith('_drop1')]
-            df = df.loc[:, ~df.columns.str.endswith('_drop2')]
-            
-            return process_data(df)
-        else:
-            return None
-    except Exception as e:
-        st.error(f"Error processing files: {str(e)}")
-        return None
+def process_data(m, v1, v2):
+    # Masterdata Mapping
+    m = m[['Buyer', 'Account_Status', 'AM']].rename(columns={'Buyer': 'buyer', 'AM': 'am_names'})
+    m['company'] = m['buyer']
+    m['account_status'] = m['Account_Status'].astype(str).str.replace(r'\s*-\s*', '-', regex=True).str.strip().str.title()
+    m['account_status'] = m['account_status'].str.replace('(Am)', '(AM)', regex=False)
+    valid_statuses = ['Workable-Active', 'Workable-Inactive (AM)', 'Workable-Temporarily Suspended', 'Team Direct']
+    m = m[m['account_status'].isin(valid_statuses)]
+    m = m.drop(columns=['Account_Status'])
 
-def parse_file(file):
-    if file.name.lower().endswith('.csv'):
-        return pd.read_csv(file)
-    return pd.read_excel(file)
+    # View 1 Mapping
+    v1 = v1[['company', 'Outstanding_Balance', 'Facility_Size', 'Last_Disbursed_Date']].rename(columns={
+        'company': 'buyer',
+        'Outstanding_Balance': 'outstanding_balance',
+        'Facility_Size': 'facility_size',
+        'Last_Disbursed_Date': 'last_disbursed_date'
+    })
 
-def process_data(df):
-    for col in REQUIRED_COLS:
-        if col not in df.columns:
-            df[col] = pd.NA
-            
-    # Apply Strict Filter for Valid Statuses
-    df = df[df['Account_Status'].isin(VALID_STATUSES)].copy()
+    # View 2 Mapping
+    v2 = v2[['Buyer', 'due_date_of_invoice', 'settlement_date', 'payment_total_usd', 'AM_Email']].rename(columns={
+        'Buyer': 'buyer',
+        'due_date_of_invoice': 'due_date_invoice',
+        'AM_Email': 'am_view2'
+    })
+
+    # Merge Portfolio
+    portfolio = pd.merge(m, v1, on='buyer', how='left')
+    portfolio['am_names'] = portfolio['am_names'].fillna('Unassigned')
+    portfolio.loc[portfolio['am_names'] == '', 'am_names'] = 'Unassigned'
     
-    df['Outstanding Balance'] = pd.to_numeric(df['Outstanding Balance'], errors='coerce').fillna(0)
-    df['Facility Size'] = pd.to_numeric(df['Facility Size'], errors='coerce').fillna(0)
-    df['Payment Total USD'] = pd.to_numeric(df['Payment Total USD'], errors='coerce').fillna(0)
+    portfolio['facility_size'] = pd.to_numeric(portfolio['facility_size'], errors='coerce').fillna(0)
+    portfolio['outstanding_balance'] = pd.to_numeric(portfolio['outstanding_balance'], errors='coerce').fillna(0)
     
-    df['Last Disbursed Date'] = pd.to_datetime(df['Last Disbursed Date'], errors='coerce')
-    df['Due Date of Invoice'] = pd.to_datetime(df['Due Date of Invoice'], errors='coerce')
-    df['Settlement Date'] = pd.to_datetime(df['Settlement Date'], errors='coerce')
-    
-    df['AM Names'] = df['AM Names'].combine_first(df['AM'])
-    df['AM Names'] = df['AM Names'].fillna('Unassigned')
-    df.loc[df['Buyer'].isna() | (df['Buyer'] == ''), 'AM Names'] = 'Unassigned'
-    
-    df['Utilisation %'] = (df['Outstanding Balance'] / df['Facility Size'].replace(0, pd.NA)) * 100
-    df['Utilisation %'] = df['Utilisation %'].fillna(0)
-    
-    def cat_util(u):
-        if u >= 70: return 'High'
-        elif u >= 50: return 'Medium'
-        else: return 'Low'
-    df['Utilisation Category'] = df['Utilisation %'].apply(cat_util)
+    portfolio['utilisation_pct'] = np.where(portfolio['facility_size'] > 0, (portfolio['outstanding_balance'] / portfolio['facility_size']) * 100, 0)
+    portfolio['utilisation_category'] = pd.cut(portfolio['utilisation_pct'], bins=[-np.inf, 50, 70, np.inf], labels=['Low', 'Medium', 'High'], right=False)
     
     now = pd.Timestamp.now()
-    df['Days Since Disbursed'] = (now - df['Last Disbursed Date']).dt.days
-    df['180-Day Alert'] = df['Days Since Disbursed'].apply(lambda x: 'YES' if pd.notna(x) and x > 180 else 'NO')
+    portfolio['last_disbursed_date'] = pd.to_datetime(portfolio['last_disbursed_date'], errors='coerce')
+    portfolio['alert_180_days'] = (now - portfolio['last_disbursed_date']).dt.days > 180
 
-    df['Buyer_Clean'] = df['Buyer'].fillna('Unknown')
-    df['Settle_Date_Clean'] = df['Settlement Date'].dt.date.fillna('None')
+    # View 2 Logic
+    v2['due_date_invoice'] = pd.to_datetime(v2['due_date_invoice'], errors='coerce')
+    v2['settlement_date'] = pd.to_datetime(v2['settlement_date'], errors='coerce')
+    v2['payment_total_usd'] = pd.to_numeric(v2['payment_total_usd'], errors='coerce').fillna(0)
+    v2['collect_amount_flag'] = v2['settlement_date'].isna()
     
-    # Pre-calculate Dedup Logic globally
-    dedup_sum = df[df['Payment Total USD'] > 0].groupby(['Buyer_Clean', 'Settle_Date_Clean'])['Payment Total USD'].sum().reset_index()
-    dedup_sum.rename(columns={'Payment Total USD': 'Deduplicated Repayment'}, inplace=True)
-    df = pd.merge(df, dedup_sum, on=['Buyer_Clean', 'Settle_Date_Clean'], how='left')
-    df['Deduplicated Repayment'] = df['Deduplicated Repayment'].fillna(0)
+    curr_month, curr_year = now.month, now.year
+    mask_due = (v2['due_date_invoice'].dt.month == curr_month) & (v2['due_date_invoice'].dt.year == curr_year)
+    mask_settle = (v2['settlement_date'].dt.month == curr_month) & (v2['settlement_date'].dt.year == curr_year)
+    v2['present_month_rule'] = mask_due | mask_settle
+
+    # Dedup Repayments
+    v2['settlement_date_clean'] = v2['settlement_date'].dt.date.fillna('None')
+    dedup = v2[v2['payment_total_usd'] > 0].groupby(['buyer', 'settlement_date_clean'])['payment_total_usd'].sum().reset_index()
+    dedup = dedup.rename(columns={'payment_total_usd': 'deduped_repayment'})
     
-    return df
+    dedup_totals = dedup.groupby('buyer')['deduped_repayment'].sum().reset_index()
+    portfolio = pd.merge(portfolio, dedup_totals, on='buyer', how='left')
+    portfolio['deduped_repayment'] = portfolio['deduped_repayment'].fillna(0)
+    
+    portfolio['adjusted_outstanding'] = portfolio['outstanding_balance'] - portfolio['deduped_repayment']
+    portfolio['post_repayment_util'] = np.where(portfolio['facility_size'] > 0, (portfolio['adjusted_outstanding'] / portfolio['facility_size']) * 100, 0)
+    portfolio['low_util_post_repay_flag'] = portfolio['post_repayment_util'] < 50
+    
+    return portfolio, v2
 
-# --- UI LAYOUT ---
-st.title("📊 Unified AM Portfolio Dashboard")
+def load_file(file):
+    return pd.read_csv(file) if file.name.lower().endswith('.csv') else pd.read_excel(file)
 
-if 'master_df' not in st.session_state:
-    st.session_state.master_df = None
 
+# --- 2. SIDEBAR UPLOAD & FILTERS ---
 with st.sidebar:
-    st.header("📂 Data Source")
+    st.image("https://cdn-icons-png.flaticon.com/512/3003/3003299.png", width=60)
+    st.title("Data Ingestion")
     
-    if st.button("Load Sample Data", type="primary", use_container_width=True):
-        raw_sample = generate_sample_data()
-        st.session_state.master_df = process_data(raw_sample)
-        st.success("Sample data loaded!")
-        st.rerun()
+    upload_mode = st.radio("Upload Mode:", ["Three Separate Files", "Single File (3 Sheets)"])
+    portfolio = v2 = None
+    
+    if upload_mode == "Three Separate Files":
+        f_m = st.file_uploader("Upload Masterdata", type=["xlsx", "csv"])
+        f_v1 = st.file_uploader("Upload View 1", type=["xlsx", "csv"])
+        f_v2 = st.file_uploader("Upload View 2", type=["xlsx", "csv"])
         
-    st.divider()
-    
-    upload_mode = st.radio("Upload Own Files:", ["Single Combined Sheet", "Three Separate Sheets"])
-    
-    single_file = master_file = view1_file = view2_file = None
-    if upload_mode == "Single Combined Sheet":
-        single_file = st.file_uploader("Upload Combined Data (Excel/CSV)", type=["xlsx", "csv"])
+        if st.button("Process Data", use_container_width=True) and f_m and f_v1 and f_v2:
+            with st.spinner("Processing Business Logic..."):
+                portfolio, v2 = process_data(load_file(f_m), load_file(f_v1), load_file(f_v2))
+                st.session_state['portfolio'] = portfolio
+                st.session_state['v2'] = v2
+                
     else:
-        master_file = st.file_uploader("1. Masterdata", type=["xlsx", "csv"])
-        view1_file = st.file_uploader("2. View 1", type=["xlsx", "csv"])
-        view2_file = st.file_uploader("3. View 2", type=["xlsx", "csv"])
+        single = st.file_uploader("Upload Combined Excel", type=["xlsx"])
+        if st.button("Process Data", use_container_width=True) and single:
+            with st.spinner("Processing Business Logic..."):
+                xl = pd.ExcelFile(single)
+                if len(xl.sheet_names) >= 3:
+                    portfolio, v2 = process_data(xl.parse(0), xl.parse(1), xl.parse(2))
+                    st.session_state['portfolio'] = portfolio
+                    st.session_state['v2'] = v2
+                else:
+                    st.error("Excel file must contain at least 3 sheets.")
+
+# --- 3. MAIN DASHBOARD ---
+if 'portfolio' in st.session_state:
+    df_port = st.session_state['portfolio']
+    df_v2 = st.session_state['v2']
+    
+    st.title("AM Portfolio Command Center")
+    
+    # Global Filters applied to Portfolio Base
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        am_filter = st.multiselect("Filter by AM Name:", options=sorted(df_port['am_names'].unique()), default=[])
+    with col_f2:
+        status_filter = st.multiselect("Filter by Account Status:", options=sorted(df_port['account_status'].unique()), default=[])
         
-    if st.button("Process Files", use_container_width=True):
-        with st.spinner("Processing logic & Mapping Columns..."):
-            df = load_and_merge_data(single_file, master_file, view1_file, view2_file)
-            if df is not None:
-                st.session_state.master_df = df
-                st.success("Data successfully processed & mapped!")
-                st.rerun()
+    filtered_port = df_port.copy()
+    if am_filter: filtered_port = filtered_port[filtered_port['am_names'].isin(am_filter)]
+    if status_filter: filtered_port = filtered_port[filtered_port['account_status'].isin(status_filter)]
+    
+    # Cascade filters to V2
+    filtered_v2 = df_v2[df_v2['buyer'].isin(filtered_port['buyer'])].copy()
 
-if st.session_state.master_df is not None:
-    df = st.session_state.master_df
-    
-    # 1. Available Months Logic (Fixing the Empty Month Bug)
-    all_dates = pd.concat([df['Due Date of Invoice'], df['Settlement Date']]).dropna()
-    if not all_dates.empty:
-        available_months = sorted(all_dates.dt.to_period('M').unique().astype(str), reverse=True)
-    else:
-        available_months = [pd.Timestamp.now().strftime('%Y-%m')]
-
-    # 2. Global Filters
-    st.markdown("### 🎛️ Global Portfolio Filters")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        selected_month = st.selectbox("Selected Month (Invoices)", available_months)
-    with col2:
-        am_options = ["All AMs"] + sorted(list(df['AM Names'].dropna().unique()))
-        selected_am = st.selectbox("AM Name", am_options)
-    with col3:
-        status_options = ["All Statuses"] + sorted(list(df['Account_Status'].dropna().unique()))
-        selected_status = st.selectbox("Account Status", status_options)
-    with col4:
-        search_query = st.text_input("Search Company or Buyer", placeholder="Type to search...")
-        
-    # Apply Global Filters
-    filtered_df = df.copy()
-    if selected_am != "All AMs": filtered_df = filtered_df[filtered_df['AM Names'] == selected_am]
-    if selected_status != "All Statuses": filtered_df = filtered_df[filtered_df['Account_Status'] == selected_status]
-    if search_query:
-        query = search_query.lower()
-        mask = filtered_df['Company'].str.lower().str.contains(query, na=False) | filtered_df['Buyer'].str.lower().str.contains(query, na=False)
-        filtered_df = filtered_df[mask]
-        
-    # Apply Month Filter for the specific 'month_df'
-    filtered_df['In Selected Month'] = False
-    mask_due = (filtered_df['Due Date of Invoice'].dt.to_period('M').astype(str) == selected_month)
-    mask_settle = (filtered_df['Settlement Date'].dt.to_period('M').astype(str) == selected_month)
-    filtered_df.loc[mask_due | mask_settle, 'In Selected Month'] = True
-    
-    month_df = filtered_df[filtered_df['In Selected Month'] == True].copy()
-    
-    # 3. Separate the Unique Accounts (Fixing the Duplicate Multiplication Bug)
-    # We take exactly ONE row per buyer for facility/outstanding KPI math so we don't multiply by # of invoices
-    unique_accts = filtered_df.drop_duplicates(subset=['Buyer_Clean']).copy()
-    
-    st.divider()
-
-    # --- TOP ROW KPIs ---
-    tot_fac = unique_accts['Facility Size'].sum()
-    tot_out = unique_accts['Outstanding Balance'].sum()
-    glob_util = (tot_out / tot_fac * 100) if tot_fac > 0 else 0
-    
-    # Repayments KPI (Deduplicated properly)
-    unique_repayments = month_df.drop_duplicates(subset=['Buyer_Clean', 'Settle_Date_Clean'])
-    tot_repay = unique_repayments['Deduplicated Repayment'].sum()
-
+    # --- Section A: Top Level KPIs ---
+    st.markdown("### 📈 Portfolio Overview")
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total Facility Size", f"${tot_fac:,.0f}")
-    k2.metric("Total Outstanding", f"${tot_out:,.0f}")
-    k3.metric("Global Average Utilisation", f"{glob_util:.1f}%")
-    k4.metric(f"Collections ({selected_month})", f"${tot_repay:,.0f}")
-    
+    with k1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3 style='margin:0; font-size:16px; color:#888;'>Total Facility Size</h3>
+            <h2 style='margin:0; color:#00C4B4;'>${filtered_port['facility_size'].sum():,.0f}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3 style='margin:0; font-size:16px; color:#888;'>Total Outstanding</h3>
+            <h2 style='margin:0; color:#00C4B4;'>${filtered_port['outstanding_balance'].sum():,.0f}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    with k3:
+        avg_util = filtered_port['utilisation_pct'].mean()
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3 style='margin:0; font-size:16px; color:#888;'>Avg Utilisation</h3>
+            <h2 style='margin:0; color:#00C4B4;'>{avg_util:.1f}%</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    with k4:
+        alerts = filtered_port['alert_180_days'].sum()
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3 style='margin:0; font-size:16px; color:#888;'>180-Day Alerts</h3>
+            <h2 style='margin:0; color:#FF4B4B;'>{alerts} Accounts</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
     st.divider()
-
-    # --- MIDDLE ROW 1: PORTFOLIO & RISK ---
-    c1, c2 = st.columns([6, 4])
-    with c1:
-        st.markdown("#### 🌍 Portfolio Concentration")
-        fig_tree = px.treemap(
-            unique_accts, 
-            path=[px.Constant("All Portfolio"), 'Account_Status', 'AM Names', 'Buyer_Clean'], 
-            values='Facility Size',
-            color='Utilisation %',
-            color_continuous_scale='RdYlGn_r',
-            range_color=[0, 100],
-            title="Sized by Facility, Colored by Utilisation"
-        )
-        fig_tree.update_traces(root_color="lightgrey")
-        fig_tree.update_layout(margin = dict(t=30, l=10, r=10, b=10))
-        st.plotly_chart(fig_tree, use_container_width=True)
-        
-    with c2:
-        st.markdown("#### ⚠️ Risk Matrix (Facility vs Outstanding)")
-        max_val = max(unique_accts['Facility Size'].max(), unique_accts['Outstanding Balance'].max()) if not unique_accts.empty else 100
-        fig_scatter = px.scatter(
-            unique_accts, x="Facility Size", y="Outstanding Balance", 
-            color="180-Day Alert", 
-            color_discrete_map={"YES": "red", "NO": "green"},
-            hover_name="Buyer_Clean", hover_data=["AM Names", "Utilisation %"],
-            title="Red dots indicate 180-Day Disbursement Alerts"
-        )
-        if max_val > 0:
-            fig_scatter.add_shape(type="line", x0=0, y0=0, x1=max_val, y1=max_val, line=dict(color="black", dash="dash"))
-        fig_scatter.update_layout(margin = dict(t=30, l=10, r=10, b=10))
-        st.plotly_chart(fig_scatter, use_container_width=True)
-
-    st.divider()
-
-    # --- MIDDLE ROW 2: TRENDS & LEADERBOARD ---
-    c3, c4 = st.columns(2)
-    with c3:
-        st.markdown(f"#### 💵 Daily Collections Trend ({selected_month})")
-        if not unique_repayments.empty:
-            timeline_df = unique_repayments.groupby('Settle_Date_Clean')['Deduplicated Repayment'].sum().reset_index()
-            timeline_df = timeline_df[timeline_df['Settle_Date_Clean'] != 'None']
-            fig_timeline = px.bar(
-                timeline_df, x='Settle_Date_Clean', y='Deduplicated Repayment',
-                labels={'Settle_Date_Clean': 'Settlement Date', 'Deduplicated Repayment': 'Amount Collected'}
-            )
-            fig_timeline.update_layout(margin = dict(t=10, l=10, r=10, b=10))
-            st.plotly_chart(fig_timeline, use_container_width=True)
-        else:
-            st.info(f"No settlements found for {selected_month}.")
-
-    with c4:
-        st.markdown("#### 👑 AM Performance Leaderboard")
-        am_perf = unique_accts.groupby('AM Names').agg(
-            Total_Facility=('Facility Size', 'sum'),
-            Avg_Utilisation=('Utilisation %', 'mean')
-        ).reset_index().sort_values('Total_Facility', ascending=False)
-        
-        fig_combo = go.Figure()
-        fig_combo.add_trace(go.Bar(x=am_perf['AM Names'], y=am_perf['Total_Facility'], name="Facility Size ($)", marker_color='teal', yaxis='y1'))
-        fig_combo.add_trace(go.Scatter(x=am_perf['AM Names'], y=am_perf['Avg_Utilisation'], name="Avg Utilisation (%)", mode='lines+markers', marker=dict(color='orange', size=8), line=dict(width=3), yaxis='y2'))
-        fig_combo.update_layout(
-            yaxis=dict(title="Facility Size ($)", side='left'),
-            yaxis2=dict(title="Avg Utilisation (%)", overlaying='y', side='right', range=[0, 100]),
-            legend=dict(x=1.1, y=1),
-            margin = dict(t=10, l=10, r=10, b=10)
-        )
-        st.plotly_chart(fig_combo, use_container_width=True)
-
-    st.divider()
-
-    # --- MASTER DATA TABLE ---
-    st.markdown(f"### 📋 Unified Master Data ({selected_month})")
-    st.write("All flags and logics (180-Day, Present Month, Low Utilisation) are pre-calculated and merged into this unified table.")
     
-    # Calculate Post-Repayment flags specifically for the selected month
-    def get_global_flags(row):
-        flags = []
-        if pd.isna(row['Settlement Date']): 
-            flags.append("Collect Amount (Missing Settle Date)")
-        if row['Facility Size'] > 0:
-            post_util = (row['Outstanding Balance'] - row['Deduplicated Repayment']) / row['Facility Size']
-            if post_util < 0.5: flags.append("Low Util Post-Repay")
-        return " | ".join(flags) if flags else "None"
-        
-    month_df['Invoice Flags'] = month_df.apply(get_global_flags, axis=1)
+    # --- Single Page Layout Sections via Tabs ---
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🏢 Company-Level View (View 1 & Master)", 
+        "🧾 Invoices & Repayments (View 2)", 
+        "⚠️ Workable-Inactive (AM)", 
+        "🏆 Top Accounts"
+    ])
     
-    display_cols = [
-        'Company', 'Buyer', 'Account_Status', 'AM Names', 
-        'Outstanding Balance', 'Facility Size', 'Utilisation %', 'Utilisation Category',
-        '180-Day Alert', 'Due Date of Invoice', 'Settlement Date', 
-        'Deduplicated Repayment', 'Invoice Flags'
-    ]
-    
-    table_df = month_df[display_cols].copy()
-    for date_col in ['Due Date of Invoice', 'Settlement Date']:
-        table_df[date_col] = table_df[date_col].dt.strftime('%Y-%m-%d').fillna('')
+    with tab1:
+        st.markdown("#### Portfolio Base & Utilisation")
+        st.dataframe(
+            filtered_port[['buyer', 'account_status', 'am_names', 'facility_size', 'outstanding_balance', 'utilisation_pct', 'utilisation_category', 'last_disbursed_date', 'alert_180_days']],
+            use_container_width=True, hide_index=True
+        )
         
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### Utilisation Category Distribution")
+            fig = px.pie(filtered_port, names='utilisation_category', hole=0.4, color_discrete_sequence=['#FF4B4B', '#FFA500', '#00C4B4'])
+            fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            st.markdown("#### Post-Repayment Low Utilisation (< 50%)")
+            low_post = filtered_port[filtered_port['low_util_post_repay_flag']]
+            st.dataframe(low_post[['buyer', 'facility_size', 'outstanding_balance', 'deduped_repayment', 'post_repayment_util']], use_container_width=True, hide_index=True)
+
+    with tab2:
+        st.markdown("#### Present-Month Rule (Current Calendar Month)")
+        v2_present = filtered_v2[filtered_v2['present_month_rule']]
+        st.dataframe(v2_present[['buyer', 'due_date_invoice', 'settlement_date', 'payment_total_usd', 'am_view2']], use_container_width=True, hide_index=True)
+        
+        st.markdown("#### Collect Amount Flags (Missing Settlement Date)")
+        collect = filtered_v2[filtered_v2['collect_amount_flag']]
+        st.dataframe(collect[['buyer', 'due_date_invoice', 'payment_total_usd', 'am_view2']], use_container_width=True, hide_index=True)
+
+    with tab3:
+        st.markdown("#### Dedicated View: Workable-Inactive (AM)")
+        inactive_am = filtered_port[filtered_port['account_status'] == 'Workable-Inactive (AM)']
+        st.metric("Total Inactive AM Accounts", len(inactive_am))
+        st.dataframe(inactive_am[['buyer', 'am_names', 'facility_size', 'last_disbursed_date', 'alert_180_days']], use_container_width=True, hide_index=True)
+
+    with tab4:
+        c3, c4 = st.columns(2)
+        with c3:
+            st.markdown("#### Top 15 Accounts (By Facility Size)")
+            top_15 = df_port.sort_values('facility_size', ascending=False).head(15)
+            fig_bar = px.bar(top_15, x='facility_size', y='buyer', orientation='h', color='facility_size', color_continuous_scale='teal')
+            fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=10, b=10, l=10, r=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+        with c4:
+            st.markdown("#### Top 50 Team Direct (By Facility Size)")
+            team_direct = df_port[df_port['account_status'] == 'Team Direct'].sort_values('facility_size', ascending=False).head(50)
+            if not team_direct.empty:
+                st.dataframe(team_direct[['buyer', 'facility_size', 'outstanding_balance', 'utilisation_pct']], use_container_width=True, hide_index=True)
+            else:
+                st.info("No 'Team Direct' accounts found in the dataset.")
 
 else:
     st.markdown("""
-        <div style="text-align: center; padding: 50px;">
-            <h1 style="color: #008080;">Welcome to AM Portfolio Intelligence</h1>
-            <p style="color: #666; font-size: 18px;">To see the dashboard in action, please <b>Load Sample Data</b> or <b>Upload your 3 Excel files</b> using the sidebar on the left.</p>
+        <div style="text-align: center; padding-top: 100px;">
+            <h1 style="color: #00C4B4;">Welcome to the AM Portfolio Dashboard</h1>
+            <p style="color: #888; font-size: 18px;">Please upload your Masterdata, View 1, and View 2 files via the sidebar to generate the intelligence reports.</p>
         </div>
     """, unsafe_allow_html=True)
