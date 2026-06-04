@@ -732,7 +732,7 @@ def main() -> None:
     metric_cols = st.columns(6)
     metric_cols[0].metric("Accounts", f"{len(filtered_accounts):,}")
     metric_cols[1].metric("Facility Size", format_money(filtered_accounts["facility_size"].sum()))
-    metric_cols[2].metric("Outstanding", format_money(filtered_accounts["outstanding_balance"].sum()))
+    metric_cols[2].metric("Outstanding Balance", format_money(filtered_accounts["outstanding_balance"].sum()))
     metric_cols[3].metric("Avg Utilisation", f"{filtered_accounts['utilisation_pct'].mean() if len(filtered_accounts) else 0:,.1f}%")
     metric_cols[4].metric("180-Day Alerts", f"{filtered_accounts['alert_180_days'].sum():,}")
     metric_cols[5].metric("Unassigned", f"{(filtered_accounts['am_names'] == 'Unassigned').sum():,}")
