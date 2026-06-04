@@ -887,9 +887,13 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+        pending_rows = view2_present[view2_present["collect_amount"]]
+        pending_accounts_count = pending_rows["buyer_key"].nunique()
+        total_pending_amount = pending_rows["payment_total_usd"].sum()
+
         v2_left, v2_mid, v2_right = st.columns(3)
-        v2_left.metric("Recent Rows", f"{len(view2_present):,}")
-        v2_mid.metric("Pending Collection", f"{view2_present['collect_amount'].sum():,}")
+        v2_left.metric("Pending Accounts", f"{pending_accounts_count:,}")
+        v2_mid.metric("Pending Amount", format_money(total_pending_amount))
         v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
 
         repay_by_date = repayments_dedup.groupby("settlement_date", as_index=False)["deduped_repayment"].sum()
