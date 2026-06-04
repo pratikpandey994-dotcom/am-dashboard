@@ -612,28 +612,94 @@ def render_upload_help() -> None:
     )
 
 
+def get_sample_data() -> LoadedData:
+    today = pd.Timestamp.today().normalize()
+    
+    master_df = pd.DataFrame({
+        "Buyer": ["Acme Corp", "Globex", "Initech", "Umbrella Corp", "Soylent Corp"],
+        "Account Status": ["Workable-Active", "Workable-Inactive (AM)", "Workable-Active", "Workable-Temporarily suspended", "Workable-Active"],
+        "AM": ["Alice Smith", "Bob Jones", "Alice Smith", "Charlie Brown", "Alice Smith"],
+        "Team": ["Direct", "Direct", "Indirect", "Direct", "Direct"],
+        "Facility Size": [1000000, 500000, 250000, 750000, 1200000],
+        "OB": [850000, 450000, 50000, 700000, 100000],
+        "Last Disbursed Date": [
+            today - pd.Timedelta(days=10),
+            today - pd.Timedelta(days=200),
+            today - pd.Timedelta(days=5),
+            today - pd.Timedelta(days=30),
+            today - pd.Timedelta(days=190)
+        ]
+    })
+    
+    view1_df = pd.DataFrame({
+        "company": master_df["Buyer"],
+        "AM Name": master_df["AM"],
+        "Facility Size": master_df["Facility Size"],
+        "Outstanding Balance": master_df["OB"],
+        "Last Disbursed Date": master_df["Last Disbursed Date"]
+    })
+    
+    view2_df = pd.DataFrame({
+        "Buyer": ["Acme Corp", "Acme Corp", "Globex", "Initech", "Soylent Corp"],
+        "AM Email": ["alice@example.com", "alice@example.com", "bob@example.com", "alice@example.com", "alice@example.com"],
+        "due date of invoice": [
+            today + pd.Timedelta(days=5),
+            today - pd.Timedelta(days=2),
+            today + pd.Timedelta(days=10),
+            today + pd.Timedelta(days=15),
+            today - pd.Timedelta(days=5)
+        ],
+        "settlement date": [
+            pd.NaT,
+            today - pd.Timedelta(days=1),
+            pd.NaT,
+            pd.NaT,
+            today - pd.Timedelta(days=3)
+        ],
+        "payment total usd": [50000, 50000, 20000, 10000, 15000]
+    })
+    
+    return LoadedData(
+        master=master_df,
+        view1=view1_df,
+        view2=view2_df,
+        flexible=None,
+        source_mode="Sample Data",
+        mode="full"
+    )
+
+
 def main() -> None:
     inject_style()
+
+    if "use_sample" not in st.session_state:
+        st.session_state["use_sample"] = False
+
+    with st.sidebar:
+        st.header("Data Upload")
+        if st.button("Load Sample Data", use_container_width=True):
+            st.session_state["use_sample"] = True
+
+        single_file = st.file_uploader(
+            "Workbook or single-sheet file",
+            type=["xlsx", "xls"],
+            key="single_file",
+        )
+        master_file = st.file_uploader("Masterdata file", type=["xlsx", "xls"], key="master_file")
+        view1_file = st.file_uploader("View 1 - Company file", type=["xlsx", "xls"], key="view1_file")
+        view2_file = st.file_uploader("View 2 - Invoices / Repayments file", type=["xlsx", "xls"], key="view2_file")
+
+        if single_file or master_file or view1_file or view2_file:
+            st.session_state["use_sample"] = False
 
     st.title("AM Portfolio Dashboard")
     st.caption("Portfolio utilisation, 180-day alerts, present-month invoices, repayments, and Team Direct coverage.")
 
-    with st.expander("Data Upload", expanded=True):
-        upload_cols = st.columns(4)
-        with upload_cols[0]:
-            single_file = st.file_uploader(
-                "Workbook or single-sheet file",
-                type=["xlsx", "xls"],
-                key="single_file",
-            )
-        with upload_cols[1]:
-            master_file = st.file_uploader("Masterdata file", type=["xlsx", "xls"], key="master_file")
-        with upload_cols[2]:
-            view1_file = st.file_uploader("View 1 - Company file", type=["xlsx", "xls"], key="view1_file")
-        with upload_cols[3]:
-            view2_file = st.file_uploader("View 2 - Invoices / Repayments file", type=["xlsx", "xls"], key="view2_file")
+    if st.session_state["use_sample"]:
+        loaded = get_sample_data()
+    else:
+        loaded = load_uploaded_data(single_file, master_file, view1_file, view2_file)
 
-    loaded = load_uploaded_data(single_file, master_file, view1_file, view2_file)
     if loaded is None:
         render_upload_help()
         return
