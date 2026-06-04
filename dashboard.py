@@ -220,7 +220,7 @@ def load_uploaded_data(single_file, master_file, view1_file, view2_file) -> Opti
 
 
 @st.cache_data(show_spinner=False)
-def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     master_cols = {
         "Buyer": first_existing(master, ["Buyer"]),
         "Account_Status": first_existing(master, ["Account_Status", "Account Status"]),
@@ -242,7 +242,9 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "AM_Email": first_existing(view2, ["AM_Email", "AM Email"]),
         "due_date_of_invoice": first_existing(view2, ["due_date_of_invoice", "due date of invoice"]),
         "settlement_date": first_existing(view2, ["settlement_date", "settlement date"]),
-        "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd"]),
+        "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd", "Outstanding"]),
+        "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date"]),
+        "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced"]),
     }
     require_columns(master, master_cols, "Masterdata")
     require_columns(view1, view1_cols, "View 1")
@@ -319,14 +321,18 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         am_view2=view2[view2_cols["AM_Email"]].astype("string").str.strip(),
         due_date_invoice=to_date(view2[view2_cols["due_date_of_invoice"]]),
         settlement_date=to_date(view2[view2_cols["settlement_date"]]),
+        disbursed_date=to_date(view2[view2_cols["disbursed_date"]]),
         payment_total_usd=to_number(view2[view2_cols["payment_total_usd"]]),
-    )[["buyer", "buyer_key", "am_view2", "due_date_invoice", "settlement_date", "payment_total_usd"]]
+        total_advanced=to_number(view2[view2_cols["total_advanced"]]),
+    )[["buyer", "buyer_key", "am_view2", "due_date_invoice", "settlement_date", "disbursed_date", "payment_total_usd", "total_advanced"]]
 
-    present_month = (
-        ((view2_l["due_date_invoice"].dt.month == today.month) & (view2_l["due_date_invoice"].dt.year == today.year))
-        | ((view2_l["settlement_date"].dt.month == today.month) & (view2_l["settlement_date"].dt.year == today.year))
+    # Invoices & Repayments: cover current and previous month for better visibility
+    lookback_date = (today - pd.DateOffset(months=1)).replace(day=1)
+    present_month_mask = (
+        (view2_l["due_date_invoice"] >= lookback_date)
+        | (view2_l["settlement_date"] >= lookback_date)
     )
-    view2_present = view2_l[present_month].copy()
+    view2_present = view2_l[present_month_mask].copy()
     view2_present["collect_amount"] = view2_present["settlement_date"].isna()
 
     repayments_dedup = (
@@ -344,6 +350,16 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
     accounts["post_repayment_util"] = (accounts["adjusted_outstanding"].div(facility_denominator) * 100).fillna(0)
     accounts["post_repayment_util"] = accounts["post_repayment_util"].replace([np.inf, -np.inf], 0).fillna(0)
     accounts["low_utilisation_after_repayment"] = accounts["post_repayment_util"] < 50
+
+    # OB Trend: Past 6 months
+    trend_data = []
+    for i in range(6, -1, -1):
+        d = (today - pd.DateOffset(months=i)).replace(day=1) + pd.offsets.MonthEnd(0)
+        # Outstanding at end of d = Sum(total_advanced where disbursed <= d) - Sum(payment where settlement <= d)
+        advances = view2_l[view2_l["disbursed_date"] <= d]["total_advanced"].sum()
+        settlements = view2_l[view2_l["settlement_date"] <= d]["payment_total_usd"].sum()
+        trend_data.append({"Month": d.strftime("%b %Y"), "Outstanding Balance": max(0, advances - settlements)})
+    ob_trend = pd.DataFrame(trend_data)
 
     keep_account_cols = [
         "buyer",
@@ -363,7 +379,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "post_repayment_util",
         "low_utilisation_after_repayment",
     ]
-    return accounts[keep_account_cols], view2_present, repayments_dedup
+    return accounts[keep_account_cols], view2_present, repayments_dedup, ob_trend
 
 
 def choose_default(df: pd.DataFrame, candidates: Iterable[str]) -> str:
@@ -427,6 +443,12 @@ def render_flexible_mapping(df: pd.DataFrame) -> Dict[str, Optional[str]]:
         )
     with row3[3]:
         am_view2 = column_selector("View 2 AM / Email", df, ["AM_Email", "AM Email", "AM"])
+    
+    row4 = st.columns(4)
+    with row4[0]:
+        disbursed_date = column_selector("Disbursed Date", df, ["disbursed_date", "Disbursed Date"])
+    with row4[1]:
+        total_advanced = column_selector("Total Advanced", df, ["total_advanced", "Total Advanced"])
 
     return {
         "buyer": buyer,
@@ -441,11 +463,13 @@ def render_flexible_mapping(df: pd.DataFrame) -> Dict[str, Optional[str]]:
         "settlement_date": settlement_date,
         "payment_total_usd": payment_total_usd,
         "am_view2": am_view2,
+        "disbursed_date": disbursed_date,
+        "total_advanced": total_advanced,
     }
 
 
 @st.cache_data(show_spinner=False)
-def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if not mapping.get("buyer"):
         raise ValueError("Please select a Buyer / Account column for single-sheet mode.")
 
@@ -513,7 +537,11 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     has_due = mapping.get("due_date_invoice") is not None
     has_settlement = mapping.get("settlement_date") is not None
     has_payment = mapping.get("payment_total_usd") is not None
-    if has_due or has_settlement or has_payment:
+    has_disbursed = mapping.get("disbursed_date") is not None
+    has_advanced = mapping.get("total_advanced") is not None
+
+    view2_l = pd.DataFrame()
+    if has_due or has_settlement or has_payment or has_disbursed or has_advanced:
         view2_l = pd.DataFrame(
             {
                 "buyer": df[buyer_col].astype("string").str.strip(),
@@ -521,14 +549,17 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
                 "am_view2": df[mapping["am_view2"]].astype("string").str.strip() if mapping.get("am_view2") else "",
                 "due_date_invoice": to_date(df[mapping["due_date_invoice"]]) if has_due else pd.NaT,
                 "settlement_date": to_date(df[mapping["settlement_date"]]) if has_settlement else pd.NaT,
+                "disbursed_date": to_date(df[mapping["disbursed_date"]]) if has_disbursed else pd.NaT,
                 "payment_total_usd": to_number(df[mapping["payment_total_usd"]]) if has_payment else 0,
+                "total_advanced": to_number(df[mapping["total_advanced"]]) if has_advanced else 0,
             }
         )
-        present_month = (
-            ((view2_l["due_date_invoice"].dt.month == today.month) & (view2_l["due_date_invoice"].dt.year == today.year))
-            | ((view2_l["settlement_date"].dt.month == today.month) & (view2_l["settlement_date"].dt.year == today.year))
+        lookback_date = (today - pd.DateOffset(months=1)).replace(day=1)
+        present_month_mask = (
+            (view2_l["due_date_invoice"] >= lookback_date)
+            | (view2_l["settlement_date"] >= lookback_date)
         )
-        view2_present = view2_l[present_month].copy()
+        view2_present = view2_l[present_month_mask].copy()
         view2_present["collect_amount"] = view2_present["settlement_date"].isna()
 
         if has_settlement and has_payment and not view2_present.empty:
@@ -538,6 +569,16 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
                 .sum()
                 .rename(columns={"payment_total_usd": "deduped_repayment"})
             )
+
+    # OB Trend: Past 6 months
+    trend_data = []
+    if not view2_l.empty and has_disbursed and has_advanced:
+        for i in range(6, -1, -1):
+            d = (today - pd.DateOffset(months=i)).replace(day=1) + pd.offsets.MonthEnd(0)
+            advances = view2_l[view2_l["disbursed_date"] <= d]["total_advanced"].sum()
+            settlements = view2_l[view2_l["settlement_date"] <= d]["payment_total_usd"].sum()
+            trend_data.append({"Month": d.strftime("%b %Y"), "Outstanding Balance": max(0, advances - settlements)})
+    ob_trend = pd.DataFrame(trend_data)
 
     repayment_by_buyer = repayments_dedup.groupby("buyer_key", as_index=False)["deduped_repayment"].sum()
     accounts = accounts.merge(repayment_by_buyer, on="buyer_key", how="left")
@@ -567,7 +608,7 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
             "post_repayment_util",
             "low_utilisation_after_repayment",
         ]
-    ], view2_present, repayments_dedup
+    ], view2_present, repayments_dedup, ob_trend
 
 
 def format_money(value: float) -> str:
@@ -603,6 +644,7 @@ def dataframe_config() -> Dict[str, object]:
         "last_disbursed_date": st.column_config.DateColumn("Last Disbursed"),
         "due_date_invoice": st.column_config.DateColumn("Due Date"),
         "settlement_date": st.column_config.DateColumn("Settlement Date"),
+        "disbursed_date": st.column_config.DateColumn("Disbursed Date"),
     }
 
 
@@ -639,25 +681,24 @@ def get_sample_data() -> LoadedData:
         "Last Disbursed Date": master_df["Last Disbursed Date"]
     })
     
-    view2_df = pd.DataFrame({
-        "Buyer": ["Acme Corp", "Acme Corp", "Globex", "Initech", "Soylent Corp"],
-        "AM Email": ["alice@example.com", "alice@example.com", "bob@example.com", "alice@example.com", "alice@example.com"],
-        "due date of invoice": [
-            today + pd.Timedelta(days=5),
-            today - pd.Timedelta(days=2),
-            today + pd.Timedelta(days=10),
-            today + pd.Timedelta(days=15),
-            today - pd.Timedelta(days=5)
-        ],
-        "settlement date": [
-            pd.NaT,
-            today - pd.Timedelta(days=1),
-            pd.NaT,
-            pd.NaT,
-            today - pd.Timedelta(days=3)
-        ],
-        "payment total usd": [50000, 50000, 20000, 10000, 15000]
-    })
+    # Generate historical transactions for View 2 to show trend
+    tx_data = []
+    buyers = ["Acme Corp", "Globex", "Initech", "Umbrella Corp", "Soylent Corp"]
+    for i in range(12): # 12 months of history
+        month_offset = today - pd.DateOffset(months=i)
+        for buyer in buyers:
+            # Advance
+            tx_data.append({
+                "Buyer": buyer,
+                "AM Email": "am@example.com",
+                "due date of invoice": month_offset + pd.Timedelta(days=30),
+                "settlement date": month_offset + pd.Timedelta(days=25) if i > 0 else pd.NaT,
+                "disbursement date": month_offset,
+                "payment total usd": 100000,
+                "total advanced": 100000
+            })
+    
+    view2_df = pd.DataFrame(tx_data)
     
     return LoadedData(
         master=master_df,
@@ -708,12 +749,12 @@ def main() -> None:
 
     try:
         if loaded.mode == "full":
-            accounts, view2_present, repayments_dedup = build_logic(loaded.master, loaded.view1, loaded.view2)
+            accounts, view2_present, repayments_dedup, ob_trend = build_logic(loaded.master, loaded.view1, loaded.view2)
         else:
             with st.expander("Column Mapping", expanded=True):
                 st.info("Single-sheet mode: select the columns to use for dashboard calculations.")
                 mapping = render_flexible_mapping(loaded.flexible)
-                accounts, view2_present, repayments_dedup = build_flexible_logic(loaded.flexible, mapping)
+                accounts, view2_present, repayments_dedup, ob_trend = build_flexible_logic(loaded.flexible, mapping)
     except Exception as exc:
         st.error(str(exc))
         return
@@ -758,6 +799,7 @@ def main() -> None:
 
         left, right = st.columns([1.05, 1])
         with left:
+            st.subheader("Utilisation Category")
             util_order = ["High", "Medium", "Low"]
             util_counts = (
                 filtered_accounts["utilisation_category"]
@@ -778,6 +820,7 @@ def main() -> None:
             st.plotly_chart(fig, use_container_width=True)
 
         with right:
+            st.subheader("Top 15 AMs by Outstanding")
             by_am = (
                 filtered_accounts.groupby("am_names", as_index=False)
                 .agg(
@@ -799,6 +842,18 @@ def main() -> None:
                 labels={"am_names": "AM", "outstanding_balance": "Outstanding", "alerts": "180-Day Alerts"},
             )
             fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=330, yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig, use_container_width=True)
+
+        if not ob_trend.empty:
+            st.subheader("Portfolio Outstanding Trend (Past 6 Months)")
+            fig = px.area(
+                ob_trend,
+                x="Month",
+                y="Outstanding Balance",
+                markers=True,
+                color_discrete_sequence=["#008080"],
+            )
+            fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=350)
             st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Accounts Requiring Attention")
@@ -826,16 +881,16 @@ def main() -> None:
         )
 
     with view2_tab:
-        st.header("Present-Month Invoices & Repayments")
+        st.header("Recent Invoices & Repayments")
         st.markdown(
-            '<div class="section-note">Rows where invoice due date or settlement date falls in the current calendar month.</div>',
+            '<div class="section-note">Rows covering current and previous month activity (Due Date or Settlement Date).</div>',
             unsafe_allow_html=True,
         )
 
         v2_left, v2_mid, v2_right = st.columns(3)
-        v2_left.metric("Present-Month Rows", f"{len(view2_present):,}")
-        v2_mid.metric("Collect Amount Rows", f"{view2_present['collect_amount'].sum():,}")
-        v2_right.metric("Deduped Repayment", format_money(repayments_dedup["deduped_repayment"].sum()))
+        v2_left.metric("Recent Rows", f"{len(view2_present):,}")
+        v2_mid.metric("Pending Collection", f"{view2_present['collect_amount'].sum():,}")
+        v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
 
         repay_by_date = repayments_dedup.groupby("settlement_date", as_index=False)["deduped_repayment"].sum()
         if not repay_by_date.empty:
@@ -849,15 +904,18 @@ def main() -> None:
             fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=310)
             st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Present-Month View 2 Rows")
-        st.dataframe(
-            view2_present.sort_values(["collect_amount", "due_date_invoice"], ascending=[False, True]),
-            use_container_width=True,
-            hide_index=True,
-            column_config=dataframe_config(),
-        )
+        st.subheader("Recent View 2 Activity")
+        if view2_present.empty:
+            st.warning("No activity found for the current or previous month. Check your date columns or mapping.")
+        else:
+            st.dataframe(
+                view2_present.sort_values(["collect_amount", "due_date_invoice"], ascending=[False, True]),
+                use_container_width=True,
+                hide_index=True,
+                column_config=dataframe_config(),
+            )
 
-        st.subheader("Deduped Repayments by Buyer and Settlement Date")
+        st.subheader("Deduped Repayments (Recent)")
         st.dataframe(
             repayments_dedup.sort_values("deduped_repayment", ascending=False),
             use_container_width=True,
@@ -919,8 +977,12 @@ def main() -> None:
         st.header("Logical Data")
         st.subheader("Accounts Logic Table")
         st.dataframe(filtered_accounts, use_container_width=True, hide_index=True, column_config=dataframe_config())
-        st.subheader("Raw Present-Month View 2 Logic Table")
+        st.subheader("Raw Recent View 2 Logic Table")
         st.dataframe(view2_present, use_container_width=True, hide_index=True, column_config=dataframe_config())
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
