@@ -887,9 +887,16 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-        pending_rows = view2_present[view2_present["collect_amount"]]
-        pending_accounts_count = pending_rows["buyer_key"].nunique()
-        total_pending_amount = pending_rows["payment_total_usd"].sum()
+        # Safely calculate pending metrics
+        pending_accounts_count = 0
+        total_pending_amount = 0.0
+        
+        if not view2_present.empty and "collect_amount" in view2_present.columns:
+            pending_rows = view2_present[view2_present["collect_amount"]]
+            if "buyer_key" in pending_rows.columns:
+                pending_accounts_count = pending_rows["buyer_key"].nunique()
+            if "payment_total_usd" in pending_rows.columns:
+                total_pending_amount = pending_rows["payment_total_usd"].sum()
 
         v2_left, v2_mid, v2_right = st.columns(3)
         v2_left.metric("Pending Accounts", f"{pending_accounts_count:,}")
