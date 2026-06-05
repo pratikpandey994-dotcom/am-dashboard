@@ -407,6 +407,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
     present_month_mask = (
         (view2_l["due_date_invoice"] >= lookback_date)
         | (view2_l["settlement_date"] >= lookback_date)
+        | (view2_l["disbursed_date"] >= lookback_date)
     )
     view2_present = view2_l[present_month_mask].copy()
     view2_present["collect_amount"] = view2_present["settlement_date"].isna()
@@ -900,7 +901,7 @@ def main() -> None:
     with metrics_placeholder:
         # Calculate Current Month Utilisation from view2_present (Current Month mask)
         this_month_start = pd.Timestamp.today().normalize().replace(day=1)
-        this_month_view2 = view2_present[view2_present["due_date_invoice"] >= this_month_start]
+        this_month_view2 = view2_present[view2_present["disbursed_date"] >= this_month_start]
         
         current_month_util = 0.0
         if not this_month_view2.empty and "total_advanced" in this_month_view2.columns:
