@@ -584,9 +584,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     else:
         accounts["team"] = ""
 
-    accounts["outstanding_balance"] = to_number(df[mapping["outstanding_balance"]]) if mapping.get("outstanding_balance") else 0
-    accounts["facility_size"] = to_number(df[mapping["facility_size"]]) if mapping.get("facility_size") else 0
-    accounts["last_disbursed_date"] = to_date(df[mapping["last_disbursed_date"]]) if mapping.get("last_disbursed_date") else pd.NaT
+    if mapping.get("last_disbursed_date"):
+        accounts["last_disbursed_date"] = to_date(df[mapping["last_disbursed_date"]])
+    else:
+        accounts["last_disbursed_date"] = pd.NaT
 
     aggregate_spec = {
         "company": ("company", "first"),
@@ -607,7 +608,11 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
         ["High", "Medium"],
         default="Low",
     )
-    accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days
+    
+    # Critical: Ensure last_disbursed_date is datetime for aging calculation
+    accounts["last_disbursed_date"] = pd.to_datetime(accounts["last_disbursed_date"])
+    accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days.fillna(0).astype(int)
+    
     accounts["alert_120_days"] = accounts["days_since_last_disbursed"] > 120
     accounts["alert_150_days"] = accounts["days_since_last_disbursed"] > 150
     accounts["alert_180_days"] = accounts["days_since_last_disbursed"] > 180
@@ -817,6 +822,15 @@ def main() -> None:
 
         if single_file or master_file or view1_file or view2_file:
             st.session_state["use_sample"] = False
+        
+        st.divider()
+        st.header("Interactive Filters")
+        aging_bucket = st.selectbox(
+            "Drill down by Aging (Last Activity)",
+            options=["All Accounts", "120+ Days", "150+ Days", "180+ Days", "356+ Days"],
+            index=0,
+            help="Filter the dashboard to focus on specific inactivity buckets."
+        )
 
     st.title("AM Portfolio Dashboard")
     st.caption("Portfolio utilisation, 180-day alerts, present-month invoices, repayments, and Team Direct coverage.")
@@ -864,6 +878,16 @@ def main() -> None:
             selected_statuses = st.multiselect("Account Status", status_options, default=status_options)
 
     filtered_accounts = filter_accounts(accounts, selected_ams, selected_statuses)
+
+    # Interactive Aging Filter Implementation
+    if aging_bucket == "120+ Days":
+        filtered_accounts = filtered_accounts[filtered_accounts["alert_120_days"]]
+    elif aging_bucket == "150+ Days":
+        filtered_accounts = filtered_accounts[filtered_accounts["alert_150_days"]]
+    elif aging_bucket == "180+ Days":
+        filtered_accounts = filtered_accounts[filtered_accounts["alert_180_days"]]
+    elif aging_bucket == "356+ Days":
+        filtered_accounts = filtered_accounts[filtered_accounts["alert_356_days"]]
 
     # Fill placeholders
     with metrics_placeholder:
