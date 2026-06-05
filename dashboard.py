@@ -626,7 +626,19 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     accounts["alert_180_days"] = (accounts["days_since_last_disbursed"] > 180) & (accounts["days_since_last_disbursed"] < 9999)
     accounts["alert_356_days"] = (accounts["days_since_last_disbursed"] > 356) & (accounts["days_since_last_disbursed"] < 9999)
 
-    view2_present = pd.DataFrame(columns=["buyer", "buyer_key", "am_view2", "due_date_invoice", "settlement_date", "payment_total_usd", "collect_amount"])
+    view2_present = pd.DataFrame(
+        columns=[
+            "buyer",
+            "buyer_key",
+            "am_view2",
+            "due_date_invoice",
+            "settlement_date",
+            "disbursed_date",
+            "payment_total_usd",
+            "total_advanced",
+            "collect_amount",
+        ]
+    )
     repayments_dedup = pd.DataFrame(columns=["buyer_key", "buyer", "settlement_date", "deduped_repayment"])
 
     has_due = mapping.get("due_date_invoice") is not None
