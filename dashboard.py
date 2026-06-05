@@ -604,7 +604,7 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
         "account_status": ("account_status", "first"),
         "team": ("team", "first"),
         "am_names": ("am_names", "first"),
-        "outstanding_balance": ("outstanding_balance", "sum"),
+        "outstanding_balance": ("outstanding_balance", "max"),
         "facility_size": ("facility_size", "max"),
         "last_disbursed_date": ("last_disbursed_date", "max"),
     }
