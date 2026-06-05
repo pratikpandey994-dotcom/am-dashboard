@@ -304,11 +304,11 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "Last_Disbursed_Date": first_existing(master, ["Last_Disbursed_Date", "Last Disbursed Date"]),
     }
     view1_cols = {
-        "company": first_existing(view1, ["company", "Buyer"]),
+        "company": first_existing(view1, ["company", "Buyer", "Account"]),
         "AM_Name": first_existing(view1, ["AM_Name", "AM Name", "AM"]),
-        "Facility_Size": first_existing(view1, ["Facility_Size", "Facility Size"]),
-        "Outstanding_Balance": first_existing(view1, ["Outstanding_Balance", "Outstanding Balance"]),
-        "Last_Disbursed_Date": first_existing(view1, ["Last_Disbursed_Date", "Last Disbursed Date"]),
+        "Facility_Size": first_existing(view1, ["Facility_Size", "Facility Size", "Limit"]),
+        "Outstanding_Balance": first_existing(view1, ["Outstanding_Balance", "Outstanding Balance", "OB", "Outstanding", "Balance"]),
+        "Last_Disbursed_Date": first_existing(view1, ["Last_Disbursed_Date", "Last Disbursed Date", "Disbursed Date"]),
     }
     view2_cols = {
         "Buyer": first_existing(view2, ["Buyer"]),
