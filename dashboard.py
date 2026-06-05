@@ -1001,15 +1001,27 @@ def main() -> None:
                 st.plotly_chart(fig, use_container_width=True)
 
             if not ob_trend.empty:
-                st.subheader("Portfolio Outstanding Trend (Past 6 Months)")
+                st.subheader("Portfolio OB Trend (Past 6 Months)")
+                total_limit = filtered_accounts["facility_size"].sum()
+                plot_trend = ob_trend.copy()
+                if total_limit > 0:
+                    plot_trend["Util %"] = (plot_trend["Outstanding Balance"] / total_limit) * 100
+                    plot_trend["Label"] = plot_trend.apply(
+                        lambda r: f"{format_money(r['Outstanding Balance'])} ({r['Util %']:.1f}%)", axis=1
+                    )
+                else:
+                    plot_trend["Label"] = plot_trend["Outstanding Balance"].apply(format_money)
+
                 fig = px.area(
-                    ob_trend,
+                    plot_trend,
                     x="Month",
                     y="Outstanding Balance",
                     markers=True,
+                    text="Label",
                     color_discrete_sequence=["#008080"],
                 )
-                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=350)
+                fig.update_traces(textposition="top center")
+                fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=380)
                 st.plotly_chart(fig, use_container_width=True)
             elif loaded.mode == "flexible":
                 st.info("💡 **Tip:** To see the Portfolio Outstanding Trend, make sure to map 'Disbursed Date' and 'Total Advanced' columns in the mapping section below.")
