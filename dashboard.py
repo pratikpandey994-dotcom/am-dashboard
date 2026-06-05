@@ -462,7 +462,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "post_repayment_util",
         "low_utilisation_after_repayment",
     ]
-    return accounts[keep_account_cols], view2_present, repayments_dedup, ob_trend
+    return accounts[keep_account_cols], view2_present, repayments_dedup, ob_trend, view2_l
 
 
 def choose_default(df: pd.DataFrame, candidates: Iterable[str]) -> str:
@@ -879,13 +879,13 @@ def main() -> None:
     
     try:
         if loaded.mode == "full":
-            accounts, view2_present, repayments_dedup, ob_trend = build_logic(loaded.master, loaded.view1, loaded.view2)
+            accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_logic(loaded.master, loaded.view1, loaded.view2)
         else:
             with mapping_placeholder:
                 with st.expander("Column Mapping", expanded=True):
                     st.info("Single-sheet mode: select the columns to use for dashboard calculations.")
                     mapping = render_flexible_mapping(loaded.flexible)
-                    accounts, view2_present, repayments_dedup, ob_trend = build_flexible_logic(loaded.flexible, mapping)
+                    accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_flexible_logic(loaded.flexible, mapping)
     except Exception as exc:
         st.error(str(exc))
         return
@@ -904,16 +904,41 @@ def main() -> None:
     filtered_accounts = filter_accounts(accounts, selected_ams, selected_statuses)
 
     # Interactive Aging Filter Implementation
-    if aging_bucket == "120+ Days":
+    if aging_bucket == "121-150 Days":
         filtered_accounts = filtered_accounts[filtered_accounts["alert_120_days"]]
-    elif aging_bucket == "150+ Days":
+    elif aging_bucket == "151-180 Days":
         filtered_accounts = filtered_accounts[filtered_accounts["alert_150_days"]]
-    elif aging_bucket == "180+ Days":
+    elif aging_bucket == "181-356 Days":
         filtered_accounts = filtered_accounts[filtered_accounts["alert_180_days"]]
     elif aging_bucket == "356+ Days":
         filtered_accounts = filtered_accounts[filtered_accounts["alert_356_days"]]
 
-    # Fill placeholders
+    # Recalculate OB Trend reactively based on filtered buyers
+    filtered_buyer_keys = set(filtered_accounts["buyer_key"].unique())
+    today = pd.Timestamp.today().normalize()
+    
+    reactive_trend_data = []
+    if not view2_full.empty:
+        # Filter ledger to only include buyers currently in view
+        filtered_ledger = view2_full[view2_full["buyer_key"].isin(filtered_buyer_keys)]
+        total_facility = filtered_accounts["facility_size"].sum()
+        
+        for i in range(6, -1, -1):
+            d = (today - pd.DateOffset(months=i)).replace(day=1) + pd.offsets.MonthEnd(0)
+            advances = filtered_ledger[filtered_ledger["disbursed_date"] <= d]["total_advanced"].sum()
+            settlements = filtered_ledger[filtered_ledger["settlement_date"] <= d]["payment_total_usd"].sum()
+            ob = max(0, advances - settlements)
+            util = (ob / total_facility * 100) if total_facility > 0 else 0
+            
+            reactive_trend_data.append({
+                "Month": d.strftime("%b %Y"),
+                "Outstanding Balance": ob,
+                "Facility": total_facility,
+                "Util %": util,
+                "Label": f"{format_money(ob)} ({util:.1f}%)"
+            })
+    
+    ob_trend_reactive = pd.DataFrame(reactive_trend_data)
     with metrics_placeholder:
         # Calculate Current Month Utilisation from view2_present (Current Month mask)
         this_month_start = pd.Timestamp.today().normalize().replace(day=1)
@@ -1000,20 +1025,10 @@ def main() -> None:
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=330, yaxis={"categoryorder": "total ascending"})
                 st.plotly_chart(fig, use_container_width=True)
 
-            if not ob_trend.empty:
+            if not ob_trend_reactive.empty:
                 st.subheader("Portfolio OB Trend (Past 6 Months)")
-                total_limit = filtered_accounts["facility_size"].sum()
-                plot_trend = ob_trend.copy()
-                if total_limit > 0:
-                    plot_trend["Util %"] = (plot_trend["Outstanding Balance"] / total_limit) * 100
-                    plot_trend["Label"] = plot_trend.apply(
-                        lambda r: f"{format_money(r['Outstanding Balance'])} ({r['Util %']:.1f}%)", axis=1
-                    )
-                else:
-                    plot_trend["Label"] = plot_trend["Outstanding Balance"].apply(format_money)
-
                 fig = px.area(
-                    plot_trend,
+                    ob_trend_reactive,
                     x="Month",
                     y="Outstanding Balance",
                     markers=True,
