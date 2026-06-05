@@ -443,6 +443,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
 
     keep_account_cols = [
         "buyer",
+        "buyer_key",
         "company",
         "account_status",
         "team",
