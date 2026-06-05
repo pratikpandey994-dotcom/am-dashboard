@@ -584,8 +584,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     else:
         accounts["team"] = ""
 
-    if mapping.get("last_disbursed_date"):
-        accounts["last_disbursed_date"] = to_date(df[mapping["last_disbursed_date"]])
+    # Determine the best source for disbursement date
+    disbursement_col = mapping.get("last_disbursed_date") or mapping.get("disbursed_date")
+    if disbursement_col:
+        accounts["last_disbursed_date"] = to_date(df[disbursement_col])
     else:
         accounts["last_disbursed_date"] = pd.NaT
 
@@ -611,12 +613,13 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     
     # Critical: Ensure last_disbursed_date is datetime for aging calculation
     accounts["last_disbursed_date"] = pd.to_datetime(accounts["last_disbursed_date"])
-    accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days.fillna(0).astype(int)
+    # If date is missing, we set days to a very large number (9999) so it doesn't show as "Active Today" (0)
+    accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days.fillna(9999).astype(int)
     
-    accounts["alert_120_days"] = accounts["days_since_last_disbursed"] > 120
-    accounts["alert_150_days"] = accounts["days_since_last_disbursed"] > 150
-    accounts["alert_180_days"] = accounts["days_since_last_disbursed"] > 180
-    accounts["alert_356_days"] = accounts["days_since_last_disbursed"] > 356
+    accounts["alert_120_days"] = (accounts["days_since_last_disbursed"] > 120) & (accounts["days_since_last_disbursed"] < 9999)
+    accounts["alert_150_days"] = (accounts["days_since_last_disbursed"] > 150) & (accounts["days_since_last_disbursed"] < 9999)
+    accounts["alert_180_days"] = (accounts["days_since_last_disbursed"] > 180) & (accounts["days_since_last_disbursed"] < 9999)
+    accounts["alert_356_days"] = (accounts["days_since_last_disbursed"] > 356) & (accounts["days_since_last_disbursed"] < 9999)
 
     view2_present = pd.DataFrame(columns=["buyer", "buyer_key", "am_view2", "due_date_invoice", "settlement_date", "payment_total_usd", "collect_amount"])
     repayments_dedup = pd.DataFrame(columns=["buyer_key", "buyer", "settlement_date", "deduped_repayment"])
