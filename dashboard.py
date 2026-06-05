@@ -311,13 +311,13 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "Last_Disbursed_Date": first_existing(view1, ["Last_Disbursed_Date", "Last Disbursed Date", "Disbursed Date"]),
     }
     view2_cols = {
-        "Buyer": first_existing(view2, ["Buyer"]),
-        "AM_Email": first_existing(view2, ["AM_Email", "AM Email"]),
-        "due_date_of_invoice": first_existing(view2, ["due_date_of_invoice", "due date of invoice"]),
-        "settlement_date": first_existing(view2, ["settlement_date", "settlement date"]),
-        "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd", "Outstanding"]),
-        "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date"]),
-        "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced"]),
+        "Buyer": first_existing(view2, ["Buyer", "Account", "company"]),
+        "AM_Email": first_existing(view2, ["AM_Email", "AM Email", "AM"]),
+        "due_date_of_invoice": first_existing(view2, ["due_date_of_invoice", "due date of invoice", "Due Date"]),
+        "settlement_date": first_existing(view2, ["settlement_date", "settlement date", "Settlement Date"]),
+        "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd", "payment", "Amount"]),
+        "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date", "Disbursed Date"]),
+        "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced", "Origination"]),
     }
     require_columns(master, master_cols, "Masterdata")
     require_columns(view1, view1_cols, "View 1")
