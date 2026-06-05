@@ -385,11 +385,14 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
     )
 
     today = pd.Timestamp.today().normalize()
-    accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days
-    accounts["alert_120_days"] = accounts["days_since_last_disbursed"] > 120
-    accounts["alert_150_days"] = accounts["days_since_last_disbursed"] > 150
-    accounts["alert_180_days"] = accounts["days_since_last_disbursed"] > 180
-    accounts["alert_356_days"] = accounts["days_since_last_disbursed"] > 356
+    # Handle NaT by setting to a very large number for comparison
+    accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days.fillna(9999).astype(int)
+    
+    # Exclusive aging buckets
+    accounts["alert_120_days"] = (accounts["days_since_last_disbursed"] > 120) & (accounts["days_since_last_disbursed"] <= 150)
+    accounts["alert_150_days"] = (accounts["days_since_last_disbursed"] > 150) & (accounts["days_since_last_disbursed"] <= 180)
+    accounts["alert_180_days"] = (accounts["days_since_last_disbursed"] > 180) & (accounts["days_since_last_disbursed"] <= 356)
+    accounts["alert_356_days"] = (accounts["days_since_last_disbursed"] > 356) & (accounts["days_since_last_disbursed"] < 9999)
 
     view2_l = view2.assign(
         buyer=view2[view2_cols["Buyer"]].astype("string").str.strip(),
@@ -621,9 +624,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     # If date is missing, we set days to a very large number (9999) so it doesn't show as "Active Today" (0)
     accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days.fillna(9999).astype(int)
     
-    accounts["alert_120_days"] = (accounts["days_since_last_disbursed"] > 120) & (accounts["days_since_last_disbursed"] < 9999)
-    accounts["alert_150_days"] = (accounts["days_since_last_disbursed"] > 150) & (accounts["days_since_last_disbursed"] < 9999)
-    accounts["alert_180_days"] = (accounts["days_since_last_disbursed"] > 180) & (accounts["days_since_last_disbursed"] < 9999)
+    # Exclusive aging buckets
+    accounts["alert_120_days"] = (accounts["days_since_last_disbursed"] > 120) & (accounts["days_since_last_disbursed"] <= 150)
+    accounts["alert_150_days"] = (accounts["days_since_last_disbursed"] > 150) & (accounts["days_since_last_disbursed"] <= 180)
+    accounts["alert_180_days"] = (accounts["days_since_last_disbursed"] > 180) & (accounts["days_since_last_disbursed"] <= 356)
     accounts["alert_356_days"] = (accounts["days_since_last_disbursed"] > 356) & (accounts["days_since_last_disbursed"] < 9999)
 
     view2_present = pd.DataFrame(
@@ -847,7 +851,7 @@ def main() -> None:
         st.header("Interactive Filters")
         aging_bucket = st.selectbox(
             "Drill down by Aging (Last Activity)",
-            options=["All Accounts", "120+ Days", "150+ Days", "180+ Days", "356+ Days"],
+            options=["All Accounts", "121-150 Days", "151-180 Days", "181-356 Days", "356+ Days"],
             index=0,
             help="Filter the dashboard to focus on specific inactivity buckets."
         )
@@ -1123,9 +1127,9 @@ def main() -> None:
             st.divider()
             st.subheader("Inactivity Aging (Days Since Last Activity)")
             i_row2 = st.columns(4)
-            i_row2[0].metric("120+ Days", f"{inactive['alert_120_days'].sum():,}")
-            i_row2[1].metric("150+ Days", f"{inactive['alert_150_days'].sum():,}")
-            i_row2[2].metric("180+ Days", f"{inactive['alert_180_days'].sum():,}")
+            i_row2[0].metric("121-150 Days", f"{inactive['alert_120_days'].sum():,}")
+            i_row2[1].metric("151-180 Days", f"{inactive['alert_150_days'].sum():,}")
+            i_row2[2].metric("181-356 Days", f"{inactive['alert_180_days'].sum():,}")
             i_row2[3].metric("356+ Days", f"{inactive['alert_356_days'].sum():,}")
             st.divider()
 
