@@ -33,37 +33,110 @@ def inject_style() -> None:
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        html, body, [class*="css"] {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1f2937;
+        }
+        
         .block-container {
-            padding-top: 1.4rem;
-            padding-bottom: 2rem;
-            max-width: 1540px;
+            padding-top: 2rem;
+            padding-bottom: 3rem;
+            max-width: 1580px;
         }
-        h1, h2, h3 {
-            letter-spacing: 0;
+        
+        h1 {
+            font-weight: 700;
+            color: #111827;
+            letter-spacing: -0.025em;
+            margin-bottom: 0.2rem;
         }
+        
+        h2, h3 {
+            font-weight: 600;
+            color: #374151;
+            letter-spacing: -0.01em;
+        }
+        
+        /* Metric Box Styling */
         div[data-testid="stMetric"] {
             background: #ffffff;
-            border: 1px solid #e6e8ec;
-            border-radius: 8px;
-            padding: 14px 16px;
-            box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+            border: 1px solid #f3f4f6;
+            border-radius: 12px;
+            padding: 20px 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            transition: transform 0.2s ease-in-out;
         }
+        
+        div[data-testid="stMetric"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+        }
+        
         div[data-testid="stMetricLabel"] {
-            color: #475467;
+            color: #6b7280;
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
         }
+        
         div[data-testid="stMetricValue"] {
-            color: #101828;
+            color: #111827;
+            font-size: 1.875rem;
+            font-weight: 700;
         }
+        
         .section-note {
-            color: #667085;
-            font-size: 0.92rem;
-            margin-top: -0.6rem;
-            margin-bottom: 0.8rem;
+            color: #9ca3af;
+            font-size: 0.875rem;
+            margin-top: -0.5rem;
+            margin-bottom: 1.5rem;
+            font-style: italic;
         }
+        
+        /* Expander & Container Styling */
         div[data-testid="stExpander"] {
-            border: 1px solid #e6e8ec;
-            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
             background: #ffffff;
+            overflow: hidden;
+        }
+        
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 24px;
+            background-color: transparent;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: transparent;
+            border-radius: 4px 4px 0 0;
+            gap: 1px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .stTabs [aria-selected="true"] {
+            color: #0d9488 !important;
+            border-bottom-color: #0d9488 !important;
+            font-weight: 600 !important;
+        }
+        
+        /* Divider Styling */
+        hr {
+            margin: 2rem 0;
+            border-color: #f3f4f6;
+        }
+
+        /* Dataframe Styling */
+        .stDataFrame {
+            border: 1px solid #f3f4f6;
+            border-radius: 8px;
         }
         </style>
         """,
