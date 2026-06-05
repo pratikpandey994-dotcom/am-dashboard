@@ -759,6 +759,12 @@ def main() -> None:
         st.error(str(exc))
         return
 
+    # Layout placeholders for Top Sections
+    metrics_placeholder = st.container()
+    tabs_placeholder = st.container()
+
+    # Filters at the bottom
+    st.divider()
     with st.expander("Filters", expanded=True):
         am_options = sorted(accounts["am_names"].dropna().astype(str).unique().tolist())
         status_options = sorted(accounts["account_status"].dropna().astype(str).unique().tolist())
@@ -770,226 +776,228 @@ def main() -> None:
 
     filtered_accounts = filter_accounts(accounts, selected_ams, selected_statuses)
 
-    metric_cols = st.columns(6)
-    metric_cols[0].metric("Accounts", f"{len(filtered_accounts):,}")
-    metric_cols[1].metric("Facility Size", format_money(filtered_accounts["facility_size"].sum()))
-    metric_cols[2].metric("Outstanding Balance", format_money(filtered_accounts["outstanding_balance"].sum()))
-    metric_cols[3].metric("Avg Utilisation", f"{filtered_accounts['utilisation_pct'].mean() if len(filtered_accounts) else 0:,.1f}%")
-    metric_cols[4].metric("180-Day Alerts", f"{filtered_accounts['alert_180_days'].sum():,}")
-    metric_cols[5].metric("Unassigned", f"{(filtered_accounts['am_names'] == 'Unassigned').sum():,}")
+    # Fill placeholders
+    with metrics_placeholder:
+        metric_cols = st.columns(6)
+        metric_cols[0].metric("Accounts", f"{len(filtered_accounts):,}")
+        metric_cols[1].metric("Facility Size", format_money(filtered_accounts["facility_size"].sum()))
+        metric_cols[2].metric("Outstanding Balance", format_money(filtered_accounts["outstanding_balance"].sum()))
+        metric_cols[3].metric("Avg Utilisation", f"{filtered_accounts['utilisation_pct'].mean() if len(filtered_accounts) else 0:,.1f}%")
+        metric_cols[4].metric("180-Day Alerts", f"{filtered_accounts['alert_180_days'].sum():,}")
+        metric_cols[5].metric("Unassigned", f"{(filtered_accounts['am_names'] == 'Unassigned').sum():,}")
+        st.divider()
 
-    st.divider()
-
-    overview_tab, view2_tab, inactive_tab, top_tab, data_tab = st.tabs(
-        [
-            "Portfolio",
-            "Invoices & Repayments",
-            "Inactive AM",
-            "Top Accounts",
-            "Data",
-        ]
-    )
-
-    with overview_tab:
-        st.header("Portfolio Health")
-        st.markdown(
-            '<div class="section-note">Company-level view using Masterdata status, View 1 balances, and 180-day last-disbursed alerts.</div>',
-            unsafe_allow_html=True,
+    with tabs_placeholder:
+        overview_tab, view2_tab, inactive_tab, top_tab, data_tab = st.tabs(
+            [
+                "Portfolio",
+                "Invoices & Repayments",
+                "Inactive AM",
+                "Top Accounts",
+                "Data",
+            ]
         )
 
-        left, right = st.columns([1.05, 1])
-        with left:
-            st.subheader("Utilisation Category")
-            util_order = ["High", "Medium", "Low"]
-            util_counts = (
-                filtered_accounts["utilisation_category"]
-                .value_counts()
-                .reindex(util_order, fill_value=0)
-                .reset_index()
+        with overview_tab:
+            st.header("Portfolio Health")
+            st.markdown(
+                '<div class="section-note">Company-level view using Masterdata status, View 1 balances, and 180-day last-disbursed alerts.</div>',
+                unsafe_allow_html=True,
             )
-            util_counts.columns = ["Utilisation Category", "Accounts"]
-            fig = px.bar(
-                util_counts,
-                x="Utilisation Category",
-                y="Accounts",
-                color="Utilisation Category",
-                text="Accounts",
-                color_discrete_map={"High": "#157f3b", "Medium": "#c47a00", "Low": "#b42318"},
-            )
-            fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
-            st.plotly_chart(fig, use_container_width=True)
 
-        with right:
-            st.subheader("Top 15 AMs by Outstanding")
-            by_am = (
-                filtered_accounts.groupby("am_names", as_index=False)
-                .agg(
-                    accounts=("buyer", "count"),
-                    facility_size=("facility_size", "sum"),
-                    outstanding_balance=("outstanding_balance", "sum"),
-                    alerts=("alert_180_days", "sum"),
+            left, right = st.columns([1.05, 1])
+            with left:
+                st.subheader("Utilisation Category")
+                util_order = ["High", "Medium", "Low"]
+                util_counts = (
+                    filtered_accounts["utilisation_category"]
+                    .value_counts()
+                    .reindex(util_order, fill_value=0)
+                    .reset_index()
                 )
-                .sort_values("outstanding_balance", ascending=False)
-                .head(15)
-            )
-            fig = px.bar(
-                by_am,
-                y="am_names",
-                x="outstanding_balance",
-                orientation="h",
-                color="alerts",
-                color_continuous_scale=["#d1fadf", "#f04438"],
-                labels={"am_names": "AM", "outstanding_balance": "Outstanding", "alerts": "180-Day Alerts"},
-            )
-            fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=330, yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(fig, use_container_width=True)
+                util_counts.columns = ["Utilisation Category", "Accounts"]
+                fig = px.bar(
+                    util_counts,
+                    x="Utilisation Category",
+                    y="Accounts",
+                    color="Utilisation Category",
+                    text="Accounts",
+                    color_discrete_map={"High": "#157f3b", "Medium": "#c47a00", "Low": "#b42318"},
+                )
+                fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
+                st.plotly_chart(fig, use_container_width=True)
 
-        if not ob_trend.empty:
-            st.subheader("Portfolio Outstanding Trend (Past 6 Months)")
-            fig = px.area(
-                ob_trend,
-                x="Month",
-                y="Outstanding Balance",
-                markers=True,
-                color_discrete_sequence=["#008080"],
-            )
-            fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            with right:
+                st.subheader("Top 15 AMs by Outstanding")
+                by_am = (
+                    filtered_accounts.groupby("am_names", as_index=False)
+                    .agg(
+                        accounts=("buyer", "count"),
+                        facility_size=("facility_size", "sum"),
+                        outstanding_balance=("outstanding_balance", "sum"),
+                        alerts=("alert_180_days", "sum"),
+                    )
+                    .sort_values("outstanding_balance", ascending=False)
+                    .head(15)
+                )
+                fig = px.bar(
+                    by_am,
+                    y="am_names",
+                    x="outstanding_balance",
+                    orientation="h",
+                    color="alerts",
+                    color_continuous_scale=["#d1fadf", "#f04438"],
+                    labels={"am_names": "AM", "outstanding_balance": "Outstanding", "alerts": "180-Day Alerts"},
+                )
+                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=330, yaxis={"categoryorder": "total ascending"})
+                st.plotly_chart(fig, use_container_width=True)
 
-        st.subheader("Accounts Requiring Attention")
-        attention = filtered_accounts[
-            filtered_accounts["alert_180_days"] | filtered_accounts["low_utilisation_after_repayment"]
-        ].sort_values(["alert_180_days", "post_repayment_util"], ascending=[False, True])
-        st.dataframe(
-            attention[
-                [
-                    "buyer",
-                    "am_names",
-                    "account_status",
-                    "facility_size",
-                    "outstanding_balance",
-                    "utilisation_pct",
-                    "last_disbursed_date",
-                    "alert_180_days",
-                    "post_repayment_util",
-                    "low_utilisation_after_repayment",
-                ]
-            ],
-            use_container_width=True,
-            hide_index=True,
-            column_config=dataframe_config(),
-        )
+            if not ob_trend.empty:
+                st.subheader("Portfolio Outstanding Trend (Past 6 Months)")
+                fig = px.area(
+                    ob_trend,
+                    x="Month",
+                    y="Outstanding Balance",
+                    markers=True,
+                    color_discrete_sequence=["#008080"],
+                )
+                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=350)
+                st.plotly_chart(fig, use_container_width=True)
 
-    with view2_tab:
-        st.header("Recent Invoices & Repayments")
-        st.markdown(
-            '<div class="section-note">Rows covering current and previous month activity (Due Date or Settlement Date).</div>',
-            unsafe_allow_html=True,
-        )
-
-        # Safely calculate pending metrics
-        pending_accounts_count = 0
-        total_pending_amount = 0.0
-        
-        if not view2_present.empty and "collect_amount" in view2_present.columns:
-            pending_rows = view2_present[view2_present["collect_amount"]]
-            if "buyer_key" in pending_rows.columns:
-                pending_accounts_count = pending_rows["buyer_key"].nunique()
-            if "payment_total_usd" in pending_rows.columns:
-                total_pending_amount = pending_rows["payment_total_usd"].sum()
-
-        v2_left, v2_mid, v2_right = st.columns(3)
-        v2_left.metric("Pending Accounts", f"{pending_accounts_count:,}")
-        v2_mid.metric("Pending Amount", format_money(total_pending_amount))
-        v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
-
-        repay_by_date = repayments_dedup.groupby("settlement_date", as_index=False)["deduped_repayment"].sum()
-        if not repay_by_date.empty:
-            fig = px.line(
-                repay_by_date,
-                x="settlement_date",
-                y="deduped_repayment",
-                markers=True,
-                labels={"settlement_date": "Settlement Date", "deduped_repayment": "Deduped Repayment"},
-            )
-            fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=310)
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Recent View 2 Activity")
-        if view2_present.empty:
-            st.warning("No activity found for the current or previous month. Check your date columns or mapping.")
-        else:
+            st.subheader("Accounts Requiring Attention")
+            attention = filtered_accounts[
+                filtered_accounts["alert_180_days"] | filtered_accounts["low_utilisation_after_repayment"]
+            ].sort_values(["alert_180_days", "post_repayment_util"], ascending=[False, True])
             st.dataframe(
-                view2_present.sort_values(["collect_amount", "due_date_invoice"], ascending=[False, True]),
+                attention[
+                    [
+                        "buyer",
+                        "am_names",
+                        "account_status",
+                        "facility_size",
+                        "outstanding_balance",
+                        "utilisation_pct",
+                        "last_disbursed_date",
+                        "alert_180_days",
+                        "post_repayment_util",
+                        "low_utilisation_after_repayment",
+                    ]
+                ],
                 use_container_width=True,
                 hide_index=True,
                 column_config=dataframe_config(),
             )
 
-        st.subheader("Deduped Repayments (Recent)")
-        st.dataframe(
-            repayments_dedup.sort_values("deduped_repayment", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-            column_config=dataframe_config(),
-        )
-
-    with inactive_tab:
-        st.header("Workable-Inactive AM")
-        inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
-        i1, i2, i3 = st.columns(3)
-        i1.metric("Inactive AM Accounts", f"{len(inactive):,}")
-        i2.metric("Facility Size", format_money(inactive["facility_size"].sum()))
-        i3.metric("180-Day Alerts", f"{inactive['alert_180_days'].sum():,}")
-        st.dataframe(
-            inactive.sort_values("facility_size", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-            column_config=dataframe_config(),
-        )
-
-    with top_tab:
-        st.header("Top Accounts")
-        top_left, top_right = st.columns(2)
-
-        with top_left:
-            st.subheader("Top 15 by Facility Size")
-            top15 = filtered_accounts.sort_values("facility_size", ascending=False).head(15)
-            fig = px.bar(
-                top15.sort_values("facility_size"),
-                x="facility_size",
-                y="buyer",
-                orientation="h",
-                color="utilisation_pct",
-                color_continuous_scale=["#216e8c", "#f79009", "#b42318"],
-                labels={"facility_size": "Facility Size", "buyer": "Buyer", "utilisation_pct": "Utilisation %"},
+        with view2_tab:
+            st.header("Recent Invoices & Repayments")
+            st.markdown(
+                '<div class="section-note">Rows covering current and previous month activity (Due Date or Settlement Date).</div>',
+                unsafe_allow_html=True,
             )
-            fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(top15, use_container_width=True, hide_index=True, column_config=dataframe_config())
 
-        with top_right:
-            st.subheader("Top 50 Team Direct by Facility Size")
-            team_direct = filtered_accounts[filtered_accounts["team"].astype("string").str.casefold() == "direct"]
-            top50 = team_direct.sort_values("facility_size", ascending=False).head(50)
-            fig = px.bar(
-                top50.head(20).sort_values("facility_size"),
-                x="facility_size",
-                y="buyer",
-                orientation="h",
-                color="account_status",
-                labels={"facility_size": "Facility Size", "buyer": "Buyer", "account_status": "Status"},
+            # Safely calculate pending metrics
+            pending_accounts_count = 0
+            total_pending_amount = 0.0
+            
+            if not view2_present.empty and "collect_amount" in view2_present.columns:
+                pending_rows = view2_present[view2_present["collect_amount"]]
+                if "buyer_key" in pending_rows.columns:
+                    pending_accounts_count = pending_rows["buyer_key"].nunique()
+                if "payment_total_usd" in pending_rows.columns:
+                    total_pending_amount = pending_rows["payment_total_usd"].sum()
+
+            v2_left, v2_mid, v2_right = st.columns(3)
+            v2_left.metric("Pending Accounts", f"{pending_accounts_count:,}")
+            v2_mid.metric("Pending Amount", format_money(total_pending_amount))
+            v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
+
+            repay_by_date = repayments_dedup.groupby("settlement_date", as_index=False)["deduped_repayment"].sum()
+            if not repay_by_date.empty:
+                fig = px.line(
+                    repay_by_date,
+                    x="settlement_date",
+                    y="deduped_repayment",
+                    markers=True,
+                    labels={"settlement_date": "Settlement Date", "deduped_repayment": "Deduped Repayment"},
+                )
+                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=310)
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.subheader("Recent View 2 Activity")
+            if view2_present.empty:
+                st.warning("No activity found for the current or previous month. Check your date columns or mapping.")
+            else:
+                st.dataframe(
+                    view2_present.sort_values(["collect_amount", "due_date_invoice"], ascending=[False, True]),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=dataframe_config(),
+                )
+
+            st.subheader("Deduped Repayments (Recent)")
+            st.dataframe(
+                repayments_dedup.sort_values("deduped_repayment", ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                column_config=dataframe_config(),
             )
-            fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(top50, use_container_width=True, hide_index=True, column_config=dataframe_config())
 
-    with data_tab:
-        st.header("Logical Data")
-        st.subheader("Accounts Logic Table")
-        st.dataframe(filtered_accounts, use_container_width=True, hide_index=True, column_config=dataframe_config())
-        st.subheader("Raw Recent View 2 Logic Table")
-        st.dataframe(view2_present, use_container_width=True, hide_index=True, column_config=dataframe_config())
+        with inactive_tab:
+            st.header("Workable-Inactive AM")
+            inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
+            i1, i2, i3 = st.columns(3)
+            i1.metric("Inactive AM Accounts", f"{len(inactive):,}")
+            i2.metric("Facility Size", format_money(inactive["facility_size"].sum()))
+            i3.metric("180-Day Alerts", f"{inactive['alert_180_days'].sum():,}")
+            st.dataframe(
+                inactive.sort_values("facility_size", ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                column_config=dataframe_config(),
+            )
+
+        with top_tab:
+            st.header("Top Accounts")
+            top_left, top_right = st.columns(2)
+
+            with top_left:
+                st.subheader("Top 15 by Facility Size")
+                top15 = filtered_accounts.sort_values("facility_size", ascending=False).head(15)
+                fig = px.bar(
+                    top15.sort_values("facility_size"),
+                    x="facility_size",
+                    y="buyer",
+                    orientation="h",
+                    color="utilisation_pct",
+                    color_continuous_scale=["#216e8c", "#f79009", "#b42318"],
+                    labels={"facility_size": "Facility Size", "buyer": "Buyer", "utilisation_pct": "Utilisation %"},
+                )
+                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(top15, use_container_width=True, hide_index=True, column_config=dataframe_config())
+
+            with top_right:
+                st.subheader("Top 50 Team Direct by Facility Size")
+                team_direct = filtered_accounts[filtered_accounts["team"].astype("string").str.casefold() == "direct"]
+                top50 = team_direct.sort_values("facility_size", ascending=False).head(50)
+                fig = px.bar(
+                    top50.head(20).sort_values("facility_size"),
+                    x="facility_size",
+                    y="buyer",
+                    orientation="h",
+                    color="account_status",
+                    labels={"facility_size": "Facility Size", "buyer": "Buyer", "account_status": "Status"},
+                )
+                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(top50, use_container_width=True, hide_index=True, column_config=dataframe_config())
+
+        with data_tab:
+            st.header("Logical Data")
+            st.subheader("Accounts Logic Table")
+            st.dataframe(filtered_accounts, use_container_width=True, hide_index=True, column_config=dataframe_config())
+            st.subheader("Raw Recent View 2 Logic Table")
+            st.dataframe(view2_present, use_container_width=True, hide_index=True, column_config=dataframe_config())
 
 
 if __name__ == "__main__":
