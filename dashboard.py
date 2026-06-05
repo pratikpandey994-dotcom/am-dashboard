@@ -313,7 +313,10 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
 
     today = pd.Timestamp.today().normalize()
     accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days
+    accounts["alert_120_days"] = accounts["days_since_last_disbursed"] > 120
+    accounts["alert_150_days"] = accounts["days_since_last_disbursed"] > 150
     accounts["alert_180_days"] = accounts["days_since_last_disbursed"] > 180
+    accounts["alert_356_days"] = accounts["days_since_last_disbursed"] > 356
 
     view2_l = view2.assign(
         buyer=view2[view2_cols["Buyer"]].astype("string").str.strip(),
@@ -371,7 +374,10 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "facility_size",
         "last_disbursed_date",
         "days_since_last_disbursed",
+        "alert_120_days",
+        "alert_150_days",
         "alert_180_days",
+        "alert_356_days",
         "utilisation_pct",
         "utilisation_category",
         "deduped_repayment",
@@ -529,7 +535,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
         default="Low",
     )
     accounts["days_since_last_disbursed"] = (today - accounts["last_disbursed_date"]).dt.days
+    accounts["alert_120_days"] = accounts["days_since_last_disbursed"] > 120
+    accounts["alert_150_days"] = accounts["days_since_last_disbursed"] > 150
     accounts["alert_180_days"] = accounts["days_since_last_disbursed"] > 180
+    accounts["alert_356_days"] = accounts["days_since_last_disbursed"] > 356
 
     view2_present = pd.DataFrame(columns=["buyer", "buyer_key", "am_view2", "due_date_invoice", "settlement_date", "payment_total_usd", "collect_amount"])
     repayments_dedup = pd.DataFrame(columns=["buyer_key", "buyer", "settlement_date", "deduped_repayment"])
@@ -600,7 +609,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
             "facility_size",
             "last_disbursed_date",
             "days_since_last_disbursed",
+            "alert_120_days",
+            "alert_150_days",
             "alert_180_days",
+            "alert_356_days",
             "utilisation_pct",
             "utilisation_category",
             "deduped_repayment",
@@ -747,21 +759,25 @@ def main() -> None:
 
     st.success(loaded.source_mode)
 
+    # Layout placeholders for Top Sections
+    metrics_placeholder = st.container()
+    tabs_placeholder = st.container()
+
+    # Data Processing Logic (Mapping UI at the bottom)
+    mapping_placeholder = st.container()
+    
     try:
         if loaded.mode == "full":
             accounts, view2_present, repayments_dedup, ob_trend = build_logic(loaded.master, loaded.view1, loaded.view2)
         else:
-            with st.expander("Column Mapping", expanded=True):
-                st.info("Single-sheet mode: select the columns to use for dashboard calculations.")
-                mapping = render_flexible_mapping(loaded.flexible)
-                accounts, view2_present, repayments_dedup, ob_trend = build_flexible_logic(loaded.flexible, mapping)
+            with mapping_placeholder:
+                with st.expander("Column Mapping", expanded=True):
+                    st.info("Single-sheet mode: select the columns to use for dashboard calculations.")
+                    mapping = render_flexible_mapping(loaded.flexible)
+                    accounts, view2_present, repayments_dedup, ob_trend = build_flexible_logic(loaded.flexible, mapping)
     except Exception as exc:
         st.error(str(exc))
         return
-
-    # Layout placeholders for Top Sections
-    metrics_placeholder = st.container()
-    tabs_placeholder = st.container()
 
     # Filters at the bottom
     st.divider()
@@ -863,6 +879,8 @@ def main() -> None:
                 )
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=350)
                 st.plotly_chart(fig, use_container_width=True)
+            elif loaded.mode == "flexible":
+                st.info("💡 **Tip:** To see the Portfolio Outstanding Trend, make sure to map 'Disbursed Date' and 'Total Advanced' columns in the mapping section below.")
 
             st.subheader("Accounts Requiring Attention")
             attention = filtered_accounts[
@@ -911,6 +929,29 @@ def main() -> None:
             v2_mid.metric("Pending Amount", format_money(total_pending_amount))
             v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
 
+            st.divider()
+            st.subheader("Expected Payments")
+            today = pd.Timestamp.today().normalize()
+            next_15_days = today + pd.Timedelta(days=15)
+            this_month_end = (today + pd.offsets.MonthEnd(0))
+            next_month_start = (today + pd.offsets.MonthBegin(1))
+            next_month_1st_week = next_month_start + pd.Timedelta(days=7)
+
+            def get_expected(df, start, end):
+                if df.empty: return 0.0
+                mask = (df["due_date_invoice"] >= start) & (df["due_date_invoice"] <= end) & (df["settlement_date"].isna())
+                return df[mask]["payment_total_usd"].sum()
+
+            exp_15 = get_expected(view2_present, today, next_15_days)
+            exp_month = get_expected(view2_present, today.replace(day=1), this_month_end)
+            exp_next_week = get_expected(view2_present, next_month_start, next_month_1st_week)
+
+            e1, e2, e3 = st.columns(3)
+            e1.metric("Next 15 Days", format_money(exp_15))
+            e2.metric("Entire Month", format_money(exp_month))
+            e3.metric("Next Month (1st Week)", format_money(exp_next_week))
+            st.divider()
+
             repay_by_date = repayments_dedup.groupby("settlement_date", as_index=False)["deduped_repayment"].sum()
             if not repay_by_date.empty:
                 fig = px.line(
@@ -945,16 +986,28 @@ def main() -> None:
         with inactive_tab:
             st.header("Workable-Inactive AM")
             inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
-            i1, i2, i3 = st.columns(3)
-            i1.metric("Inactive AM Accounts", f"{len(inactive):,}")
-            i2.metric("Facility Size", format_money(inactive["facility_size"].sum()))
-            i3.metric("180-Day Alerts", f"{inactive['alert_180_days'].sum():,}")
+            
+            i_row1 = st.columns(3)
+            i_row1[0].metric("Inactive AM Accounts", f"{len(inactive):,}")
+            i_row1[1].metric("Facility Size", format_money(inactive["facility_size"].sum()))
+            i_row1[2].metric("Outstanding Balance", format_money(inactive["outstanding_balance"].sum()))
+            
+            st.divider()
+            st.subheader("Inactivity Aging (Days Since Last Activity)")
+            i_row2 = st.columns(4)
+            i_row2[0].metric("120+ Days", f"{inactive['alert_120_days'].sum():,}")
+            i_row2[1].metric("150+ Days", f"{inactive['alert_150_days'].sum():,}")
+            i_row2[2].metric("180+ Days", f"{inactive['alert_180_days'].sum():,}")
+            i_row2[3].metric("356+ Days", f"{inactive['alert_356_days'].sum():,}")
+            st.divider()
+
             st.dataframe(
-                inactive.sort_values("facility_size", ascending=False),
+                inactive.sort_values("days_since_last_disbursed", ascending=False),
                 use_container_width=True,
                 hide_index=True,
                 column_config=dataframe_config(),
             )
+
 
         with top_tab:
             st.header("Top Accounts")
