@@ -333,6 +333,16 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         outstanding_balance_master=to_number(master[master_cols["OB"]]),
         last_disbursed_date_master=to_date(master[master_cols["Last_Disbursed_Date"]]),
     )
+    # Dedup Master by buyer_key
+    master_l = master_l.groupby("buyer_key", as_index=False).agg({
+        "buyer": "first",
+        "account_status": "first",
+        "am_master": "first",
+        "team": "first",
+        "facility_size_master": "max",
+        "outstanding_balance_master": "max",
+        "last_disbursed_date_master": "max",
+    })
     master_l = master_l[master_l["account_status"].isin(KEEP_STATUSES)].copy()
 
     view1_l = view1.assign(
@@ -342,14 +352,15 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         facility_size_view1=to_number(view1[view1_cols["Facility_Size"]]),
         outstanding_balance_view1=to_number(view1[view1_cols["Outstanding_Balance"]]),
         last_disbursed_date_view1=to_date(view1[view1_cols["Last_Disbursed_Date"]]),
-    )[[
-        "buyer_key",
-        "company",
-        "am_view1",
-        "facility_size_view1",
-        "outstanding_balance_view1",
-        "last_disbursed_date_view1",
-    ]]
+    )
+    # Dedup View 1 by buyer_key
+    view1_l = view1_l.groupby("buyer_key", as_index=False).agg({
+        "company": "first",
+        "am_view1": "first",
+        "facility_size_view1": "max",
+        "outstanding_balance_view1": "max",
+        "last_disbursed_date_view1": "max",
+    })
 
     accounts = master_l.merge(view1_l, on="buyer_key", how="left")
     accounts["company"] = accounts["company"].fillna(accounts["buyer"])
