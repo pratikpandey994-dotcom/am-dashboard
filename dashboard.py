@@ -584,6 +584,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     else:
         accounts["team"] = ""
 
+    # Restore missing metric columns before aggregation
+    accounts["outstanding_balance"] = to_number(df[mapping["outstanding_balance"]]) if mapping.get("outstanding_balance") else 0
+    accounts["facility_size"] = to_number(df[mapping["facility_size"]]) if mapping.get("facility_size") else 0
+
     # Determine the best source for disbursement date
     disbursement_col = mapping.get("last_disbursed_date") or mapping.get("disbursed_date")
     if disbursement_col:
