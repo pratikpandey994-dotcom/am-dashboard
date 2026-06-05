@@ -794,12 +794,23 @@ def main() -> None:
 
     # Fill placeholders
     with metrics_placeholder:
+        # Calculate Current Month Utilisation from view2_present (Current Month mask)
+        this_month_start = pd.Timestamp.today().normalize().replace(day=1)
+        this_month_view2 = view2_present[view2_present["due_date_invoice"] >= this_month_start]
+        
+        current_month_util = 0.0
+        if not this_month_view2.empty and "total_advanced" in this_month_view2.columns:
+            total_limit = filtered_accounts["facility_size"].sum()
+            total_advanced = this_month_view2["total_advanced"].sum()
+            if total_limit > 0:
+                current_month_util = (total_advanced / total_limit) * 100
+
         metric_cols = st.columns(6)
         metric_cols[0].metric("Accounts", f"{len(filtered_accounts):,}")
         metric_cols[1].metric("Facility Size", format_money(filtered_accounts["facility_size"].sum()))
         metric_cols[2].metric("Outstanding Balance", format_money(filtered_accounts["outstanding_balance"].sum()))
         metric_cols[3].metric("Avg Utilisation", f"{filtered_accounts['utilisation_pct'].mean() if len(filtered_accounts) else 0:,.1f}%")
-        metric_cols[4].metric("180-Day Alerts", f"{filtered_accounts['alert_180_days'].sum():,}")
+        metric_cols[4].metric("CM Utilisation", f"{current_month_util:,.1f}%")
         metric_cols[5].metric("Unassigned", f"{(filtered_accounts['am_names'] == 'Unassigned').sum():,}")
         st.divider()
 
