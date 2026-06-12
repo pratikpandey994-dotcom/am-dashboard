@@ -1096,8 +1096,19 @@ def main() -> None:
                     .agg(
                         accounts=("buyer", "nunique"), # unique customer accounts
                     )
-                    .sort_values("accounts", ascending=False)
                 )
+                
+                # Force all 5 explicit statuses to appear in the chart
+                all_statuses = pd.DataFrame({"account_status": [
+                    "Non Workable",
+                    "Workable - Active",
+                    "Workable - InActive BD",
+                    "Workable - InActive AM",
+                    "Workable - Temp Suspended"
+                ]})
+                by_status = pd.merge(all_statuses, by_status, on="account_status", how="left")
+                by_status["accounts"] = by_status["accounts"].fillna(0).astype(int)
+                
                 fig = px.bar(
                     by_status.sort_values("accounts"),
                     x="accounts",
