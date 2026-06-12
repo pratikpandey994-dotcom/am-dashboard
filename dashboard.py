@@ -213,10 +213,13 @@ def classify_sheet(name: str, df: pd.DataFrame) -> Optional[str]:
 
 
 @st.cache_data(show_spinner=False)
+def get_excel_data(file_bytes: bytes) -> pd.DataFrame:
+    return pd.read_excel(file_bytes)
+
 def load_uploaded_data(master_file, invoice_file) -> Optional[LoadedData]:
     if master_file and invoice_file:
-        master_df = pd.read_excel(master_file)
-        invoice_df = pd.read_excel(invoice_file)
+        master_df = get_excel_data(master_file.getvalue())
+        invoice_df = get_excel_data(invoice_file.getvalue())
         return LoadedData(
             master=master_df,
             view1=master_df,
