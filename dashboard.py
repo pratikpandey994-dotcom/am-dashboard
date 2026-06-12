@@ -259,7 +259,8 @@ def load_uploaded_data(master_file, invoice_file) -> Optional[LoadedData]:
 def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     master_cols = {
         "Buyer": first_existing(master, ["Buyer", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"]),
-        "Account_Status": first_existing(master, ["Account_Status", "Account Status", "ACCOUNT_STATUS", "USER_UTILIZATION_STATUS"]),
+        "Account_Status": first_existing(master, ["Account_Status", "Account Status", "ACCOUNT_STATUS"]),
+        "User_State": first_existing(master, ["User_State", "User State", "USER_STATE"]),
         "AM": first_existing(master, ["AM"]),
         "Team": first_existing(master, ["Team", "POD_MANAGER"]),
         "Facility_Size": first_existing(master, ["Facility_Size", "Facility Size", "FACILITY_SIZE", "TOTAL_LIMIT"]),
@@ -293,6 +294,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         buyer=master[master_cols["Buyer"]].astype("string").str.strip(),
         buyer_key=clean_key(master[master_cols["Buyer"]]),
         account_status=normalize_status(master[master_cols["Account_Status"]]),
+        user_state=master[master_cols["User_State"]].astype("string").str.strip() if master_cols.get("User_State") and master_cols["User_State"] in master.columns else "Unknown",
         am_master=master[master_cols["AM"]].astype("string").str.strip(),
         team=master[master_cols["Team"]].astype("string").str.strip(),
         facility_size_master=to_number(master[master_cols["Facility_Size"]]),
@@ -304,6 +306,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
     agg_dict.update({
         "buyer": "first",
         "account_status": "first",
+        "user_state": "first",
         "am_master": "first",
         "team": "first",
         "facility_size_master": "max",
@@ -519,6 +522,7 @@ def render_flexible_mapping(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     return {
         "buyer": buyer,
         "account_status": account_status,
+        "user_state": first_existing(df, ["User_State", "User State", "USER_STATE"]),
         "am_names": am_names,
         "team": team,
         "company": company,
@@ -560,6 +564,11 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
         accounts["account_status"] = df[mapping["account_status"]]
     else:
         accounts["account_status"] = "Unknown"
+
+    if mapping.get("user_state"):
+        accounts["user_state"] = df[mapping["user_state"]].astype("string").str.strip()
+    else:
+        accounts["user_state"] = "Unknown"
 
     if mapping.get("am_names"):
         accounts["am_names"] = df[mapping["am_names"]].astype("string").str.strip().replace("", pd.NA).fillna("Unassigned")
@@ -1090,33 +1099,23 @@ def main() -> None:
                 st.plotly_chart(fig, use_container_width=True)
 
             with right:
-                st.subheader("Account Status (User State)")
-                by_status = (
-                    filtered_accounts.groupby("account_status", as_index=False)
+                st.subheader("Distribution by User State")
+                by_state = (
+                    filtered_accounts.groupby("user_state", as_index=False)
                     .agg(
-                        accounts=("buyer", "nunique"), # unique customer accounts
+                        accounts=("buyer", "nunique"),
                     )
+                    .sort_values("accounts", ascending=False)
+                    .head(15)
                 )
-                
-                # Force all 5 explicit statuses to appear in the chart
-                all_statuses = pd.DataFrame({"account_status": [
-                    "Non Workable",
-                    "Workable - Active",
-                    "Workable - InActive BD",
-                    "Workable - InActive AM",
-                    "Workable - Temp Suspended"
-                ]})
-                by_status = pd.merge(all_statuses, by_status, on="account_status", how="left")
-                by_status["accounts"] = by_status["accounts"].fillna(0).astype(int)
-                
                 fig = px.bar(
-                    by_status.sort_values("accounts"),
+                    by_state.sort_values("accounts"),
                     x="accounts",
-                    y="account_status",
+                    y="user_state",
                     orientation="h",
-                    color="account_status",
+                    color="user_state",
                     text="accounts",
-                    labels={"accounts": "Unique Accounts", "account_status": "Status"},
+                    labels={"accounts": "Unique Accounts", "user_state": "State"},
                 )
                 fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
                 st.plotly_chart(fig, use_container_width=True)
