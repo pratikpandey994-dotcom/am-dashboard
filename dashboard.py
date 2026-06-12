@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, Tuple
 
+import io
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -214,7 +215,7 @@ def classify_sheet(name: str, df: pd.DataFrame) -> Optional[str]:
 
 @st.cache_data(show_spinner=False)
 def get_excel_data(file_bytes: bytes) -> pd.DataFrame:
-    return pd.read_excel(file_bytes)
+    return pd.read_excel(io.BytesIO(file_bytes))
 
 def load_uploaded_data(master_file, invoice_file) -> Optional[LoadedData]:
     if master_file and invoice_file:
@@ -802,7 +803,6 @@ def main() -> None:
         )
 
     st.title("AM Portfolio Dashboard")
-    st.caption("Portfolio utilisation, 180-day alerts, present-month invoices, repayments, and Team Direct coverage.")
 
     if st.session_state["use_sample"]:
         loaded = get_sample_data()
