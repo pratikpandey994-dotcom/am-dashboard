@@ -979,7 +979,6 @@ def main() -> None:
         metric_cols[3].metric("Avg Utilisation", f"{filtered_accounts['utilisation_pct'].mean() if len(filtered_accounts) else 0:,.1f}%")
         metric_cols[4].metric("CM Utilisation", f"{current_month_util:,.1f}%")
         metric_cols[5].metric("Unassigned", f"{(filtered_accounts['am_names'] == 'Unassigned').sum():,}")
-        st.divider()
 
     with tabs_placeholder:
         overview_tab, view2_tab, inactive_tab, top_tab, data_tab = st.tabs(
