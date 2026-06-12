@@ -27,7 +27,7 @@ class LoadedData:
     mode: str
 
 
-st.set_page_config(page_title="AM Portfolio Dashboard", layout="wide")
+st.set_page_config(page_title="AM Portfolio Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
 
 def inject_style() -> None:
@@ -273,8 +273,9 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         outstanding_balance_master=to_number(master[master_cols["OB"]]),
         last_disbursed_date_master=to_date(master[master_cols["Last_Disbursed_Date"]]),
     )
-    # Dedup Master by buyer_key
-    master_l = master_l.groupby("buyer_key", as_index=False).agg({
+    # Dedup Master by buyer_key and keep original columns
+    agg_dict = {col: "first" for col in master.columns}
+    agg_dict.update({
         "buyer": "first",
         "account_status": "first",
         "am_master": "first",
@@ -283,6 +284,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "outstanding_balance_master": "max",
         "last_disbursed_date_master": "max",
     })
+    master_l = master_l.groupby("buyer_key", as_index=False).agg(agg_dict)
     master_l = master_l[master_l["account_status"].isin(KEEP_STATUSES)].copy()
 
     view1_l = view1.assign(
@@ -354,7 +356,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         disbursed_date=to_date(view2[view2_cols["disbursed_date"]]),
         payment_total_usd=to_number(view2[view2_cols["payment_total_usd"]]),
         total_advanced=to_number(view2[view2_cols["total_advanced"]]),
-    )[["buyer", "buyer_key", "am_view2", "due_date_invoice", "settlement_date", "disbursed_date", "payment_total_usd", "total_advanced"]]
+    )
 
     # Invoices & Repayments: cover current and previous month for better visibility
     lookback_date = (today - pd.DateOffset(months=1)).replace(day=1)
@@ -414,7 +416,10 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "post_repayment_util",
         "low_utilisation_after_repayment",
     ]
-    return accounts[keep_account_cols], view2_present, repayments_dedup, ob_trend, view2_l
+    # Append any remaining unmapped columns from the raw master sheet
+    extra_cols = [c for c in master.columns if c not in keep_account_cols and c not in ["buyer", "buyer_key", "company", "account_status", "team", "am_names"]]
+    final_cols = keep_account_cols + extra_cols
+    return accounts[final_cols], view2_present, repayments_dedup, ob_trend, view2_l
 
 
 def choose_default(df: pd.DataFrame, candidates: Iterable[str]) -> str:
@@ -688,13 +693,7 @@ def format_money(value: float) -> str:
     return f"${value:,.0f}"
 
 
-def filter_accounts(df: pd.DataFrame, selected_ams: list[str], selected_statuses: list[str]) -> pd.DataFrame:
-    filtered = df.copy()
-    if selected_ams:
-        filtered = filtered[filtered["am_names"].isin(selected_ams)]
-    if selected_statuses:
-        filtered = filtered[filtered["account_status"].isin(selected_statuses)]
-    return filtered
+
 
 
 DISPLAY_NAMES = {
@@ -722,8 +721,14 @@ DISPLAY_NAMES = {
 }
 
 def format_df(df: pd.DataFrame) -> pd.DataFrame:
-    drop_cols = ["buyer_key", "alert_120_days", "alert_150_days", "alert_180_days", "alert_356_days", "collect_amount"]
-    df_clean = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
+    internal_cols = [
+        "buyer_key", "buyer", "company", "account_status", "team", "am_names",
+        "outstanding_balance", "facility_size", "last_disbursed_date", "days_since_last_disbursed",
+        "alert_120_days", "alert_150_days", "alert_180_days", "alert_356_days", "collect_amount",
+        "due_date_invoice", "settlement_date", "disbursed_date", "payment_total_usd", "total_advanced",
+        "am_master", "am_view1", "am_view2"
+    ]
+    df_clean = df.drop(columns=[c for c in internal_cols if c in df.columns], errors='ignore')
     return df_clean.rename(columns=DISPLAY_NAMES)
 
 def dataframe_config() -> Dict[str, object]:
@@ -823,14 +828,7 @@ def main() -> None:
         if master_file or invoice_file:
             st.session_state["use_sample"] = False
         
-        st.divider()
-        st.header("Interactive Filters")
-        aging_bucket = st.selectbox(
-            "Drill down by Aging (Last Activity)",
-            options=["All Accounts", "121-150 Days", "151-180 Days", "181-356 Days", "356+ Days"],
-            index=0,
-            help="Filter the dashboard to focus on specific inactivity buckets."
-        )
+
 
     st.title("AM Portfolio Dashboard")
 
@@ -855,28 +853,55 @@ def main() -> None:
         st.error(str(exc))
         return
 
-    # Filters at the bottom
-    st.divider()
-    with st.expander("Filters", expanded=True):
-        am_options = sorted(accounts["am_names"].dropna().astype(str).unique().tolist())
-        status_options = sorted(accounts["account_status"].dropna().astype(str).unique().tolist())
-        filter_cols = st.columns(2)
-        with filter_cols[0]:
-            selected_ams = st.multiselect("AM", am_options, default=[])
-        with filter_cols[1]:
-            selected_statuses = st.multiselect("Account Status", status_options, default=status_options)
+    # Dynamic Filters in Sidebar
+    with st.sidebar:
+        st.divider()
+        st.header("Data Filters")
+        
+        orig_master_cols = list(loaded.master.columns)
+        account_filter_cols = [c for c in accounts.columns if c in orig_master_cols]
+        
+        st.markdown("**Masterdata**")
+        selected_account_filters = st.multiselect("Add filter", account_filter_cols, default=[], key="ms_master")
+        
+        account_filter_values = {}
+        if selected_account_filters:
+            for col_name in selected_account_filters:
+                options = sorted(accounts[col_name].dropna().astype(str).unique().tolist())
+                account_filter_values[col_name] = st.multiselect(col_name, options, default=[])
 
-    filtered_accounts = filter_accounts(accounts, selected_ams, selected_statuses)
+        orig_view2_cols = list(loaded.view2.columns)
+        view2_filter_cols = [c for c in view2_full.columns if c in orig_view2_cols and c not in account_filter_cols]
 
-    # Interactive Aging Filter Implementation
-    if aging_bucket == "121-150 Days":
-        filtered_accounts = filtered_accounts[filtered_accounts["alert_120_days"]]
-    elif aging_bucket == "151-180 Days":
-        filtered_accounts = filtered_accounts[filtered_accounts["alert_150_days"]]
-    elif aging_bucket == "181-356 Days":
-        filtered_accounts = filtered_accounts[filtered_accounts["alert_180_days"]]
-    elif aging_bucket == "356+ Days":
-        filtered_accounts = filtered_accounts[filtered_accounts["alert_356_days"]]
+        st.markdown("**Invoice Data**")
+        selected_view2_filters = st.multiselect("Add filter", view2_filter_cols, default=[], key="ms_invoice")
+        view2_filter_values = {}
+        if selected_view2_filters:
+            for col_name in selected_view2_filters:
+                options = sorted(view2_full[col_name].dropna().astype(str).unique().tolist())
+                view2_filter_values[col_name] = st.multiselect(col_name, options, default=[])
+
+    filtered_accounts = accounts.copy()
+    
+    # Apply Masterdata filters
+    for col_name, selected_vals in account_filter_values.items():
+        if selected_vals:
+            filtered_accounts = filtered_accounts[filtered_accounts[col_name].astype(str).isin(selected_vals)]
+
+    # Apply Invoice filters and cascade
+    if any(view2_filter_values.values()):
+        for col_name, selected_vals in view2_filter_values.items():
+            if selected_vals:
+                view2_full = view2_full[view2_full[col_name].astype(str).isin(selected_vals)]
+        
+        valid_buyers = view2_full["buyer_key"].unique()
+        filtered_accounts = filtered_accounts[filtered_accounts["buyer_key"].isin(valid_buyers)]
+
+    # Sync all sub-datasets to the final filtered_accounts
+    final_buyers = filtered_accounts["buyer_key"].unique()
+    view2_full = view2_full[view2_full["buyer_key"].isin(final_buyers)]
+    view2_present = view2_present[view2_present["buyer_key"].isin(final_buyers)]
+    repayments_dedup = repayments_dedup[repayments_dedup["buyer_key"].isin(final_buyers)]
 
     # Recalculate OB Trend reactively based on filtered buyers
     filtered_buyer_keys = set(filtered_accounts["buyer_key"].unique())
@@ -1086,34 +1111,23 @@ def main() -> None:
             st.header("Inactive Accounts")
             inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
             
-            st.subheader("Inactivity Aging Filter")
-            bucket_map = {
-                "121-150 Days": "alert_120_days",
-                "151-180 Days": "alert_150_days",
-                "181-356 Days": "alert_180_days",
-                "356+ Days": "alert_356_days",
-            }
-            selected_bucket = st.selectbox("Select Inactivity Bucket", list(bucket_map.keys()), index=0)
-            
-            bucket_col = bucket_map[selected_bucket]
-            bucket_df = inactive[inactive[bucket_col] == True]
+            st.markdown("#### All Inactive Accounts")
             
             i_row1 = st.columns(3)
-            i_row1[0].metric(f"Accounts ({selected_bucket})", f"{len(bucket_df):,}")
-            i_row1[1].metric("Facility Size", format_money(bucket_df["facility_size"].sum()))
-            i_row1[2].metric("Outstanding Balance", format_money(bucket_df["outstanding_balance"].sum()))
+            i_row1[0].metric("Total Inactive Accounts", f"{len(inactive):,}")
+            i_row1[1].metric("Total Facility Size", format_money(inactive["facility_size"].sum()))
+            i_row1[2].metric("Total Outstanding Balance", format_money(inactive["outstanding_balance"].sum()))
             
             st.divider()
-            st.markdown(f"#### Accounts Inactive for {selected_bucket}")
-            if not bucket_df.empty:
+            if not inactive.empty:
                 st.dataframe(
-                    format_df(bucket_df.sort_values("days_since_last_disbursed", ascending=False)),
+                    format_df(inactive.sort_values("days_since_last_disbursed", ascending=False)),
                     use_container_width=True,
                     hide_index=True,
                     column_config=dataframe_config(),
                 )
             else:
-                st.info(f"No accounts found in the {selected_bucket} bucket.")
+                st.info("No inactive accounts found.")
 
 
         with top_tab:
