@@ -428,6 +428,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "buyer_key",
         "company",
         "account_status",
+        "user_state",
         "team",
         "am_names",
         "outstanding_balance",
