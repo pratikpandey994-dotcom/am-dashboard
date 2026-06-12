@@ -959,7 +959,13 @@ def main() -> None:
         if not status_col:
             status_col = "account_status"
         
-        status_options = sorted(accounts[status_col].dropna().astype(str).unique().tolist())
+        status_options = [
+            "Non Workable",
+            "Workable - Active",
+            "Workable - InActive BD",
+            "Workable - InActive AM",
+            "Workable - Temp Suspended"
+        ]
         selected_status = st.multiselect("Account Status Filter", status_options, default=[], key="main_status")
 
     st.divider()
