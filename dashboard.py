@@ -1022,41 +1022,7 @@ def main() -> None:
                 )
 
         with view2_tab:
-            st.header("Recent Invoices & Repayments")
-            st.markdown(
-                '<div class="section-note">Rows covering current and previous month activity (Due Date or Settlement Date).</div>',
-                unsafe_allow_html=True,
-            )
-
-            # Safely calculate pending metrics
-            pending_accounts_count = 0
-            total_pending_amount = 0.0
-            pending_df = pd.DataFrame()
-            
-            if not view2_present.empty and "collect_amount" in view2_present.columns:
-                pending_rows = view2_present[view2_present["collect_amount"]]
-                if "buyer_key" in pending_rows.columns:
-                    pending_accounts_count = pending_rows["buyer_key"].nunique()
-                    pending_df = pending_rows.groupby("buyer_key", as_index=False).agg({"payment_total_usd": "sum"}).rename(columns={"buyer_key": "Buyer", "payment_total_usd": "Pending Amount"})
-                if "payment_total_usd" in pending_rows.columns:
-                    total_pending_amount = pending_rows["payment_total_usd"].sum()
-
-            v2_left, v2_mid, v2_right = st.columns(3)
-            v2_left.metric("Pending Accounts", f"{pending_accounts_count:,}")
-            v2_mid.metric("Pending Amount", format_money(total_pending_amount))
-            v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
-
-            if not pending_df.empty:
-                st.markdown("#### Pending Accounts Details")
-                st.dataframe(
-                    format_df(pending_df.sort_values("Pending Amount", ascending=False)),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config=dataframe_config()
-                )
-
-            st.divider()
-            st.subheader("Expected Payments & Repayments")
+            st.header("Expected Payments & Repayments")
             col1, col2 = st.columns(2)
             with col1:
                 from_date = st.date_input("From Date", pd.Timestamp.today().normalize())
@@ -1086,17 +1052,20 @@ def main() -> None:
             e2.metric("Repayment Accounts", f"{repay_filtered['buyer_key'].nunique() if 'buyer_key' in repay_filtered.columns else 0:,}")
             e2.metric("Repayments Amount", format_money(repay_filtered['payment_total_usd'].sum() if not repay_filtered.empty else 0))
 
-            st.markdown("#### Expected Payments")
-            if not expected_filtered.empty:
-                st.dataframe(format_df(expected_filtered.sort_values("due_date_invoice")), use_container_width=True, hide_index=True, column_config=dataframe_config())
-            else:
-                st.info("No expected payments in this range.")
+            t1, t2 = st.columns(2)
+            with t1:
+                st.markdown("#### Expected Payments")
+                if not expected_filtered.empty:
+                    st.dataframe(format_df(expected_filtered.sort_values("due_date_invoice")), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                else:
+                    st.info("No expected payments in this range.")
 
-            st.markdown("#### Repayments")
-            if not repay_filtered.empty:
-                st.dataframe(format_df(repay_filtered.sort_values("settlement_date")), use_container_width=True, hide_index=True, column_config=dataframe_config())
-            else:
-                st.info("No repayments in this range.")
+            with t2:
+                st.markdown("#### Repayments")
+                if not repay_filtered.empty:
+                    st.dataframe(format_df(repay_filtered.sort_values("settlement_date")), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                else:
+                    st.info("No repayments in this range.")
 
             st.divider()
             
