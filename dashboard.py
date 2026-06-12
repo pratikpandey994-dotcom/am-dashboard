@@ -1090,28 +1090,24 @@ def main() -> None:
                 st.plotly_chart(fig, use_container_width=True)
 
             with right:
-                st.subheader("Top 15 AMs by Outstanding")
-                by_am = (
-                    filtered_accounts.groupby("am_names", as_index=False)
+                st.subheader("Account Status (User State)")
+                by_status = (
+                    filtered_accounts.groupby("account_status", as_index=False)
                     .agg(
-                        accounts=("buyer", "count"),
-                        facility_size=("facility_size", "sum"),
-                        outstanding_balance=("outstanding_balance", "sum"),
-                        alerts=("alert_180_days", "sum"),
+                        accounts=("buyer", "nunique"), # unique customer accounts
                     )
-                    .sort_values("outstanding_balance", ascending=False)
-                    .head(15)
+                    .sort_values("accounts", ascending=False)
                 )
                 fig = px.bar(
-                    by_am,
-                    y="am_names",
-                    x="outstanding_balance",
+                    by_status.sort_values("accounts"),
+                    x="accounts",
+                    y="account_status",
                     orientation="h",
-                    color="alerts",
-                    color_continuous_scale=["#d1fadf", "#f04438"],
-                    labels={"am_names": "AM", "outstanding_balance": "Outstanding", "alerts": "180-Day Alerts"},
+                    color="account_status",
+                    text="accounts",
+                    labels={"accounts": "Unique Accounts", "account_status": "Status"},
                 )
-                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=330, yaxis={"categoryorder": "total ascending"})
+                fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
                 st.plotly_chart(fig, use_container_width=True)
 
             if not ob_trend_reactive.empty:
