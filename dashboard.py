@@ -1109,7 +1109,8 @@ def main() -> None:
             st.header("Expected Payments & Repayments")
             col1, col2 = st.columns(2)
             with col1:
-                from_date = st.date_input("From Date", pd.Timestamp.today().normalize())
+                # Default from_date to 15 days ago so past repayments are visible by default
+                from_date = st.date_input("From Date", pd.Timestamp.today().normalize() - pd.Timedelta(days=15))
             with col2:
                 to_date = st.date_input("To Date", pd.Timestamp.today().normalize() + pd.Timedelta(days=15))
 
@@ -1211,7 +1212,8 @@ def main() -> None:
 
             with top_right:
                 st.subheader("Top 50 Team Direct by Facility Size")
-                team_direct = filtered_accounts[filtered_accounts["team"].astype("string").str.casefold() == "direct"]
+                # Use str.contains to robustly catch variations like "Direct ", "Direct Team", etc.
+                team_direct = filtered_accounts[filtered_accounts["team"].astype("string").str.contains("direct", case=False, na=False)]
                 top50 = team_direct.sort_values("facility_size", ascending=False).head(50)
                 fig = px.bar(
                     top50.head(20).sort_values("facility_size"),
