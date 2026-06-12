@@ -1080,10 +1080,10 @@ def main() -> None:
             repay_filtered = get_filtered_repayments(view2_present, from_dt, to_dt)
 
             e1, e2 = st.columns(2)
-            e1.metric("Expected Payments Count", f"{len(expected_filtered):,}")
+            e1.metric("Expected Payment Accounts", f"{expected_filtered['buyer_key'].nunique() if 'buyer_key' in expected_filtered.columns else 0:,}")
             e1.metric("Expected Payments Amount", format_money(expected_filtered['payment_total_usd'].sum() if not expected_filtered.empty else 0))
             
-            e2.metric("Repayments Count", f"{len(repay_filtered):,}")
+            e2.metric("Repayment Accounts", f"{repay_filtered['buyer_key'].nunique() if 'buyer_key' in repay_filtered.columns else 0:,}")
             e2.metric("Repayments Amount", format_money(repay_filtered['payment_total_usd'].sum() if not repay_filtered.empty else 0))
 
             st.markdown("#### Expected Payments")
