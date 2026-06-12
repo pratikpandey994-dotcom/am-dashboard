@@ -212,56 +212,7 @@ def classify_sheet(name: str, df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def load_uploaded_data(single_file, master_file, invoice_file) -> Optional[LoadedData]:
-    if single_file is not None:
-        sheets = workbook_sheets(single_file)
-        classified: Dict[str, pd.DataFrame] = {}
-        for sheet_name, df in sheets.items():
-            role = classify_sheet(sheet_name, df)
-            if role and role not in classified:
-                classified[role] = df
-
-        if {"master", "view1", "view2"}.issubset(classified):
-            return LoadedData(
-                master=classified["master"],
-                view1=classified["view1"],
-                view2=classified["view2"],
-                flexible=None,
-                source_mode=f"Single workbook: {single_file.name}",
-                mode="full",
-            )
-
-        if len(sheets) == 1:
-            sheet_name, df = next(iter(sheets.items()))
-            return LoadedData(
-                master=None,
-                view1=None,
-                view2=None,
-                flexible=df,
-                source_mode=f"Single sheet: {single_file.name} / {sheet_name}",
-                mode="flexible",
-            )
-
-        if classified:
-            preferred_role = next((role for role in ("master", "view1", "view2") if role in classified), None)
-            return LoadedData(
-                master=classified.get("master"),
-                view1=classified.get("view1"),
-                view2=classified.get("view2"),
-                flexible=classified[preferred_role] if preferred_role else next(iter(sheets.values())),
-                source_mode=f"Partial workbook: {single_file.name}",
-                mode="flexible",
-            )
-
-        return LoadedData(
-            master=None,
-            view1=None,
-            view2=None,
-            flexible=next(iter(sheets.values())),
-            source_mode=f"Workbook mapped as single sheet: {single_file.name}",
-            mode="flexible",
-        )
-
+def load_uploaded_data(master_file, invoice_file) -> Optional[LoadedData]:
     if master_file and invoice_file:
         master_df = pd.read_excel(master_file)
         invoice_df = pd.read_excel(invoice_file)
@@ -273,23 +224,6 @@ def load_uploaded_data(single_file, master_file, invoice_file) -> Optional[Loade
             source_mode="Two uploaded files",
             mode="full",
         )
-
-    partial_files = [
-        ("Masterdata", master_file),
-        ("Invoice Data", invoice_file),
-    ]
-    uploaded_partial = [(label, file) for label, file in partial_files if file is not None]
-    if len(uploaded_partial) == 1:
-        label, file = uploaded_partial[0]
-        return LoadedData(
-            master=None,
-            view1=None,
-            view2=None,
-            flexible=pd.read_excel(file),
-            source_mode=f"Single uploaded file: {label} / {file.name}",
-            mode="flexible",
-        )
-
     return None
 
 
@@ -777,7 +711,7 @@ def dataframe_config() -> Dict[str, object]:
 
 def render_upload_help() -> None:
     st.info(
-        "Upload one sheet for flexible mapping, one workbook with both sheets, or two separate files for the full AM logic."
+        "Upload the Masterdata file and the Invoice Data file for the full AM logic."
     )
 
 
@@ -848,15 +782,10 @@ def main() -> None:
         if st.button("Load Sample Data", use_container_width=True):
             st.session_state["use_sample"] = True
 
-        single_file = st.file_uploader(
-            "Workbook or single-sheet file",
-            type=["xlsx", "xls"],
-            key="single_file",
-        )
         master_file = st.file_uploader("Masterdata file", type=["xlsx", "xls"], key="master_file")
         invoice_file = st.file_uploader("Invoice Data file", type=["xlsx", "xls"], key="invoice_file")
 
-        if single_file or master_file or invoice_file:
+        if master_file or invoice_file:
             st.session_state["use_sample"] = False
         
         st.divider()
@@ -874,7 +803,7 @@ def main() -> None:
     if st.session_state["use_sample"]:
         loaded = get_sample_data()
     else:
-        loaded = load_uploaded_data(single_file, master_file, invoice_file)
+        loaded = load_uploaded_data(master_file, invoice_file)
 
     if loaded is None:
         render_upload_help()
@@ -886,18 +815,8 @@ def main() -> None:
     metrics_placeholder = st.container()
     tabs_placeholder = st.container()
 
-    # Data Processing Logic (Mapping UI at the bottom)
-    mapping_placeholder = st.container()
-    
     try:
-        if loaded.mode == "full":
-            accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_logic(loaded.master, loaded.view1, loaded.view2)
-        else:
-            with mapping_placeholder:
-                with st.expander("Column Mapping", expanded=True):
-                    st.info("Single-sheet mode: select the columns to use for dashboard calculations.")
-                    mapping = render_flexible_mapping(loaded.flexible)
-                    accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_flexible_logic(loaded.flexible, mapping)
+        accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_logic(loaded.master, loaded.view1, loaded.view2)
     except Exception as exc:
         st.error(str(exc))
         return
