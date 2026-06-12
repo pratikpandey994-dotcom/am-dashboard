@@ -275,16 +275,13 @@
                     <p style="font-size: 12px; color: var(--text-muted); margin-top: 5px;">Upload one file containing all required columns.</p>
                 </div>
                 <div class="upload-box">
-                    <h4 style="margin-bottom:10px;">Three Separate Sheets</h4>
+                    <h4 style="margin-bottom:10px;">Two Separate Files</h4>
                     <div style="display:flex; flex-direction:column; gap:8px;">
                         <input type="file" id="file-master" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
                         <label style="font-size:12px;">Masterdata</label>
                         
-                        <input type="file" id="file-view1" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
-                        <label style="font-size:12px;">View 1</label>
-                        
-                        <input type="file" id="file-view2" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
-                        <label style="font-size:12px;">View 2</label>
+                        <input type="file" id="file-invoice" accept=".xlsx,.csv" style="position:relative; opacity:1; z-index:2;">
+                        <label style="font-size:12px;">Invoice Data</label>
                         
                         <button class="btn btn-primary" style="margin-top:10px; width:100%; justify-content:center; position:relative; z-index:3;" onclick="handleMultiUpload()">Process Files</button>
                     </div>
@@ -637,39 +634,29 @@
 
         async function handleMultiUpload() {
             const fm = document.getElementById('file-master').files[0];
-            const f1 = document.getElementById('file-view1').files[0];
-            const f2 = document.getElementById('file-view2').files[0];
+            const fi = document.getElementById('file-invoice').files[0];
             
-            if (!fm || !f1 || !f2) {
-                alert("Please select all three files.");
+            if (!fm || !fi) {
+                alert("Please select both Masterdata and Invoice Data files.");
                 return;
             }
 
             document.getElementById('loading-overlay').style.display = 'flex';
             try {
-                const [masterData, view1Data, view2Data] = await Promise.all([
-                    readExcelFile(fm), readExcelFile(f1), readExcelFile(f2)
+                const [masterData, invoiceData] = await Promise.all([
+                    readExcelFile(fm), readExcelFile(fi)
                 ]);
 
-                // Merge logic (using Buyer as the key, falling back to Company if Buyer missing?)
+                // Merge logic (using Buyer as the key)
                 const map = new Map();
                 
                 masterData.forEach(row => {
-                    const key = row['Buyer'] || row['Company'] || Math.random().toString();
+                    const key = row['Buyer'] || row['IMPORTER_NAME'] || row['CP_COMPANY'] || row['Company'] || Math.random().toString();
                     map.set(key, {...row});
                 });
 
-                view1Data.forEach(row => {
-                    const key = row['Buyer'] || row['Company'];
-                    if (map.has(key)) {
-                        map.set(key, {...map.get(key), ...row});
-                    } else if (key) {
-                        map.set(key, {...row});
-                    }
-                });
-
-                view2Data.forEach(row => {
-                    const key = row['Buyer'] || row['Company'];
+                invoiceData.forEach(row => {
+                    const key = row['Buyer'] || row['IMPORTER_COMPANY'] || row['CP_COMPANY'] || row['Company'];
                     if (map.has(key)) {
                         map.set(key, {...map.get(key), ...row});
                     } else if (key) {

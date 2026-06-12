@@ -212,7 +212,7 @@ def classify_sheet(name: str, df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-def load_uploaded_data(single_file, master_file, view1_file, view2_file) -> Optional[LoadedData]:
+def load_uploaded_data(single_file, master_file, invoice_file) -> Optional[LoadedData]:
     if single_file is not None:
         sheets = workbook_sheets(single_file)
         classified: Dict[str, pd.DataFrame] = {}
@@ -262,20 +262,21 @@ def load_uploaded_data(single_file, master_file, view1_file, view2_file) -> Opti
             mode="flexible",
         )
 
-    if master_file and view1_file and view2_file:
+    if master_file and invoice_file:
+        master_df = pd.read_excel(master_file)
+        invoice_df = pd.read_excel(invoice_file)
         return LoadedData(
-            master=pd.read_excel(master_file),
-            view1=pd.read_excel(view1_file),
-            view2=pd.read_excel(view2_file),
+            master=master_df,
+            view1=master_df,
+            view2=invoice_df,
             flexible=None,
-            source_mode="Three uploaded files",
+            source_mode="Two uploaded files",
             mode="full",
         )
 
     partial_files = [
         ("Masterdata", master_file),
-        ("View 1 - Company", view1_file),
-        ("View 2 - Invoices / Repayments", view2_file),
+        ("Invoice Data", invoice_file),
     ]
     uploaded_partial = [(label, file) for label, file in partial_files if file is not None]
     if len(uploaded_partial) == 1:
@@ -776,7 +777,7 @@ def dataframe_config() -> Dict[str, object]:
 
 def render_upload_help() -> None:
     st.info(
-        "Upload one sheet for flexible mapping, one workbook with all three sheets, or three separate files for the full AM logic."
+        "Upload one sheet for flexible mapping, one workbook with both sheets, or two separate files for the full AM logic."
     )
 
 
@@ -853,10 +854,9 @@ def main() -> None:
             key="single_file",
         )
         master_file = st.file_uploader("Masterdata file", type=["xlsx", "xls"], key="master_file")
-        view1_file = st.file_uploader("View 1 - Company file", type=["xlsx", "xls"], key="view1_file")
-        view2_file = st.file_uploader("View 2 - Invoices / Repayments file", type=["xlsx", "xls"], key="view2_file")
+        invoice_file = st.file_uploader("Invoice Data file", type=["xlsx", "xls"], key="invoice_file")
 
-        if single_file or master_file or view1_file or view2_file:
+        if single_file or master_file or invoice_file:
             st.session_state["use_sample"] = False
         
         st.divider()
@@ -874,7 +874,7 @@ def main() -> None:
     if st.session_state["use_sample"]:
         loaded = get_sample_data()
     else:
-        loaded = load_uploaded_data(single_file, master_file, view1_file, view2_file)
+        loaded = load_uploaded_data(single_file, master_file, invoice_file)
 
     if loaded is None:
         render_upload_help()
