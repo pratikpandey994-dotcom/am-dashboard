@@ -688,17 +688,24 @@
 
         function processRawData(data) {
             // Check for missing columns warning
-            const requiredCols = [
-                'Buyer', 'Account_Status', 'AM Names', 'Company', 'Outstanding Balance', 
-                'Facility Size', 'Due Date of Invoice', 'Settlement Date', 'AM', 
-                'Payment Total USD', 'Last Disbursed Date'
+            const requiredGroups = [
+                ['Buyer', 'IMPORTER_NAME', 'IMPORTER_COMPANY', 'CP_COMPANY'],
+                ['Account_Status', 'ACCOUNT_STATUS', 'USER_UTILIZATION_STATUS'],
+                ['AM', 'AM Names'],
+                ['Outstanding Balance', 'OB', 'OUTSTANDING_ADVANCE_BALANCE_USD'], 
+                ['Facility Size', 'FACILITY_SIZE', 'TOTAL_LIMIT']
             ];
             
             if (data.length > 0) {
                 const keys = Object.keys(data[0]);
-                const missing = requiredCols.filter(c => !keys.includes(c));
+                const missing = [];
+                requiredGroups.forEach(group => {
+                    if (!group.some(c => keys.includes(c))) {
+                        missing.push(group[0]);
+                    }
+                });
                 if (missing.length > 0) {
-                    showWarning(`Warning: Missing columns - ${missing.join(', ')}`);
+                    showWarning(`Warning: Missing some data groups - ${missing.join(', ')}. Some dashboard features may not work.`);
                 }
             }
 
@@ -711,9 +718,10 @@
 
             // First pass for deduplication
             data.forEach(row => {
-                const buyer = row['Buyer'] || 'Unknown';
-                const sDate = row['Settlement Date'] ? new Date(row['Settlement Date']).getTime() : 'None';
-                const payment = parseFloat(row['Payment Total USD'] || 0);
+                const buyer = row['Buyer'] || row['IMPORTER_NAME'] || row['IMPORTER_COMPANY'] || row['CP_COMPANY'] || 'Unknown';
+                const settleDateStr = row['Settlement Date'] || row['SETTLEMENT_DATE'];
+                const sDate = settleDateStr ? new Date(settleDateStr).getTime() : 'None';
+                const payment = parseFloat(row['Payment Total USD'] || row['MARGIN_RECEIVED_USD'] || row['INVOICE_VALUE_USD'] || 0);
                 
                 if (payment > 0) {
                     const key = `${buyer}_${sDate}`;
@@ -726,18 +734,19 @@
             const processed = [];
             data.forEach(row => {
                 // Filter account status
-                const status = row['Account_Status'];
+                const status = row['Account_Status'] || row['ACCOUNT_STATUS'] || row['USER_UTILIZATION_STATUS'];
                 if (!VALID_STATUSES.includes(status)) return; // Discard invalid
 
-                const outBal = parseFloat(row['Outstanding Balance'] || 0);
-                const facSize = parseFloat(row['Facility Size'] || 0);
+                const outBal = parseFloat(row['Outstanding Balance'] || row['OUTSTANDING_ADVANCE_BALANCE_USD'] || row['OB'] || 0);
+                const facSize = parseFloat(row['Facility Size'] || row['FACILITY_SIZE'] || row['TOTAL_LIMIT'] || 0);
                 let util = 0;
                 if (facSize > 0) util = (outBal / facSize) * 100;
 
                 // 180 day alert
                 let alert180 = 'NO';
-                if (row['Last Disbursed Date']) {
-                    const ldd = new Date(row['Last Disbursed Date']);
+                const lddStr = row['Last Disbursed Date'] || row['LAST_DISBURSED_DATE'];
+                if (lddStr) {
+                    const ldd = new Date(lddStr);
                     const diffTime = Math.abs(now - ldd);
                     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                     if (diffDays > 180) alert180 = 'YES';
@@ -745,37 +754,40 @@
 
                 // AM Name assignment
                 let amNames = row['AM Names'] || row['AM'];
-                let buyer = row['Buyer'];
+                let buyer = row['Buyer'] || row['IMPORTER_NAME'] || row['IMPORTER_COMPANY'] || row['CP_COMPANY'];
                 if (!buyer || buyer.toString().trim() === '') {
-                    amNames = 'Unassigned';
-                } else if (!amNames || amNames.toString().trim() === '') {
+                    buyer = 'Unknown';
+                }
+                if (!amNames || amNames.toString().trim() === '') {
                     amNames = 'Unassigned';
                 }
 
                 // Month Rule for Tab 2
                 let inCurrentMonth = false;
-                const dDue = row['Due Date of Invoice'] ? new Date(row['Due Date of Invoice']) : null;
-                const dSet = row['Settlement Date'] ? new Date(row['Settlement Date']) : null;
+                const dueDateStr = row['Due Date of Invoice'] || row['DUE_DATE'];
+                const dDue = dueDateStr ? new Date(dueDateStr) : null;
+                const settleDateStr = row['Settlement Date'] || row['SETTLEMENT_DATE'];
+                const dSet = settleDateStr ? new Date(settleDateStr) : null;
 
                 if (dDue && dDue.getMonth() === currentMonth && dDue.getFullYear() === currentYear) inCurrentMonth = true;
                 if (dSet && dSet.getMonth() === currentMonth && dSet.getFullYear() === currentYear) inCurrentMonth = true;
 
                 // Deduplicated Payment
-                const sDateRaw = row['Settlement Date'] ? new Date(row['Settlement Date']).getTime() : 'None';
+                const sDateRaw = settleDateStr ? new Date(settleDateStr).getTime() : 'None';
                 const dedupKey = `${buyer || 'Unknown'}_${sDateRaw}`;
                 const dedupPayment = repayMap.get(dedupKey) || 0;
 
                 processed.push({
                     buyer: buyer,
-                    company: row['Company'],
+                    company: row['Company'] || row['CP_COMPANY'] || buyer,
                     status: status,
                     amNames: amNames,
                     outBal: outBal,
                     facSize: facSize,
                     util: util,
                     alert180: alert180,
-                    dueDate: row['Due Date of Invoice'],
-                    settleDate: row['Settlement Date'],
+                    dueDate: dueDateStr,
+                    settleDate: settleDateStr,
                     repayment: dedupPayment,
                     inCurrentMonth: inCurrentMonth,
                     dedupKey: dedupKey

@@ -295,29 +295,29 @@ def load_uploaded_data(single_file, master_file, view1_file, view2_file) -> Opti
 @st.cache_data(show_spinner=False)
 def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     master_cols = {
-        "Buyer": first_existing(master, ["Buyer"]),
-        "Account_Status": first_existing(master, ["Account_Status", "Account Status"]),
+        "Buyer": first_existing(master, ["Buyer", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"]),
+        "Account_Status": first_existing(master, ["Account_Status", "Account Status", "ACCOUNT_STATUS", "USER_UTILIZATION_STATUS"]),
         "AM": first_existing(master, ["AM"]),
-        "Team": first_existing(master, ["Team"]),
-        "Facility_Size": first_existing(master, ["Facility_Size", "Facility Size"]),
-        "OB": first_existing(master, ["OB", "Outstanding Balance"]),
-        "Last_Disbursed_Date": first_existing(master, ["Last_Disbursed_Date", "Last Disbursed Date"]),
+        "Team": first_existing(master, ["Team", "POD_MANAGER"]),
+        "Facility_Size": first_existing(master, ["Facility_Size", "Facility Size", "FACILITY_SIZE", "TOTAL_LIMIT"]),
+        "OB": first_existing(master, ["OB", "Outstanding Balance", "OUTSTANDING_ADVANCE_BALANCE_USD"]),
+        "Last_Disbursed_Date": first_existing(master, ["Last_Disbursed_Date", "Last Disbursed Date", "LAST_DISBURSED_DATE"]),
     }
     view1_cols = {
-        "company": first_existing(view1, ["company", "Buyer", "Account"]),
+        "company": first_existing(view1, ["company", "Buyer", "Account", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"]),
         "AM_Name": first_existing(view1, ["AM_Name", "AM Name", "AM"]),
-        "Facility_Size": first_existing(view1, ["Facility_Size", "Facility Size", "Limit"]),
-        "Outstanding_Balance": first_existing(view1, ["Outstanding_Balance", "Outstanding Balance", "OB", "Outstanding", "Balance"]),
-        "Last_Disbursed_Date": first_existing(view1, ["Last_Disbursed_Date", "Last Disbursed Date", "Disbursed Date"]),
+        "Facility_Size": first_existing(view1, ["Facility_Size", "Facility Size", "Limit", "FACILITY_SIZE", "TOTAL_LIMIT"]),
+        "Outstanding_Balance": first_existing(view1, ["Outstanding_Balance", "Outstanding Balance", "OB", "Outstanding", "Balance", "OUTSTANDING_ADVANCE_BALANCE_USD"]),
+        "Last_Disbursed_Date": first_existing(view1, ["Last_Disbursed_Date", "Last Disbursed Date", "Disbursed Date", "LAST_DISBURSED_DATE"]),
     }
     view2_cols = {
-        "Buyer": first_existing(view2, ["Buyer", "Account", "company"]),
+        "Buyer": first_existing(view2, ["Buyer", "Account", "company", "IMPORTER_COMPANY", "CP_COMPANY"]),
         "AM_Email": first_existing(view2, ["AM_Email", "AM Email", "AM"]),
-        "due_date_of_invoice": first_existing(view2, ["due_date_of_invoice", "due date of invoice", "Due Date"]),
-        "settlement_date": first_existing(view2, ["settlement_date", "settlement date", "Settlement Date"]),
-        "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd", "payment", "Amount"]),
-        "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date", "Disbursed Date"]),
-        "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced", "Origination"]),
+        "due_date_of_invoice": first_existing(view2, ["due_date_of_invoice", "due date of invoice", "Due Date", "DUE_DATE"]),
+        "settlement_date": first_existing(view2, ["settlement_date", "settlement date", "Settlement Date", "SETTLEMENT_DATE"]),
+        "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd", "payment", "Amount", "MARGIN_RECEIVED_USD", "INVOICE_VALUE_USD"]),
+        "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date", "Disbursed Date", "FIRST_ADVANCE_DATE", "INVOICE_DATE"]),
+        "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced", "Origination", "TOTAL_ADVANCED"]),
     }
     require_columns(master, master_cols, "Masterdata")
     require_columns(view1, view1_cols, "View 1")
@@ -495,30 +495,30 @@ def render_flexible_mapping(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     st.caption("Map the uploaded sheet columns into the dashboard fields.")
     row1 = st.columns(4)
     with row1[0]:
-        buyer = column_selector("Buyer / Account", df, ["Buyer", "company", "Account", "Company"], required=True)
+        buyer = column_selector("Buyer / Account", df, ["Buyer", "company", "Account", "Company", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"], required=True)
     with row1[1]:
-        account_status = column_selector("Account Status", df, ["Account_Status", "Account Status", "Status", "Stage"])
+        account_status = column_selector("Account Status", df, ["Account_Status", "Account Status", "Status", "Stage", "ACCOUNT_STATUS", "USER_UTILIZATION_STATUS"])
     with row1[2]:
         am_names = column_selector("AM Name", df, ["AM", "AM_Name", "AM Name", "Account Manager", "Owner"])
     with row1[3]:
-        team = column_selector("Team", df, ["Team"])
+        team = column_selector("Team", df, ["Team", "POD_MANAGER"])
 
     row2 = st.columns(4)
     with row2[0]:
-        company = column_selector("Company", df, ["company", "Company", "Buyer"])
+        company = column_selector("Company", df, ["company", "Company", "Buyer", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"])
     with row2[1]:
         outstanding_balance = column_selector(
             "Outstanding Balance",
             df,
-            ["Outstanding_Balance", "Outstanding Balance", "OB", "Outstanding"],
+            ["Outstanding_Balance", "Outstanding Balance", "OB", "Outstanding", "OUTSTANDING_ADVANCE_BALANCE_USD"],
         )
     with row2[2]:
-        facility_size = column_selector("Facility Size", df, ["Facility_Size", "Facility Size", "Limit"])
+        facility_size = column_selector("Facility Size", df, ["Facility_Size", "Facility Size", "Limit", "FACILITY_SIZE", "TOTAL_LIMIT"])
     with row2[3]:
         last_disbursed_date = column_selector(
             "Last Disbursed Date",
             df,
-            ["Last_Disbursed_Date", "Last Disbursed Date", "disbursed_date", "Disbursed Date"],
+            ["Last_Disbursed_Date", "Last Disbursed Date", "disbursed_date", "Disbursed Date", "LAST_DISBURSED_DATE"],
         )
 
     row3 = st.columns(4)
@@ -526,24 +526,24 @@ def render_flexible_mapping(df: pd.DataFrame) -> Dict[str, Optional[str]]:
         due_date_invoice = column_selector(
             "Due Date of Invoice",
             df,
-            ["due_date_of_invoice", "Due Date of Invoice", "due date", "Due Date"],
+            ["due_date_of_invoice", "Due Date of Invoice", "due date", "Due Date", "DUE_DATE"],
         )
     with row3[1]:
-        settlement_date = column_selector("Settlement Date", df, ["settlement_date", "Settlement Date"])
+        settlement_date = column_selector("Settlement Date", df, ["settlement_date", "Settlement Date", "SETTLEMENT_DATE"])
     with row3[2]:
         payment_total_usd = column_selector(
             "Payment Total USD",
             df,
-            ["payment_total_usd", "Payment Total USD", "payment", "Amount"],
+            ["payment_total_usd", "Payment Total USD", "payment", "Amount", "MARGIN_RECEIVED_USD", "INVOICE_VALUE_USD"],
         )
     with row3[3]:
         am_view2 = column_selector("View 2 AM / Email", df, ["AM_Email", "AM Email", "AM"])
     
     row4 = st.columns(4)
     with row4[0]:
-        disbursed_date = column_selector("Disbursed Date", df, ["disbursed_date", "Disbursed Date"])
+        disbursed_date = column_selector("Disbursed Date", df, ["disbursed_date", "Disbursed Date", "FIRST_ADVANCE_DATE", "INVOICE_DATE"])
     with row4[1]:
-        total_advanced = column_selector("Total Advanced", df, ["total_advanced", "Total Advanced"])
+        total_advanced = column_selector("Total Advanced", df, ["total_advanced", "Total Advanced", "TOTAL_ADVANCED"])
 
     return {
         "buyer": buyer,
