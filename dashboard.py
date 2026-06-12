@@ -694,9 +694,11 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
 
     return accounts[
         [
+            "buyer_key",
             "buyer",
             "company",
             "account_status",
+            "user_state",
             "team",
             "am_names",
             "outstanding_balance",
