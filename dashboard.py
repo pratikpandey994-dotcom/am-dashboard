@@ -594,6 +594,7 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     aggregate_spec = {
         "company": ("company", "first"),
         "account_status": ("account_status", "first"),
+        "user_state": ("user_state", "first"),
         "team": ("team", "first"),
         "am_names": ("am_names", "first"),
         "outstanding_balance": ("outstanding_balance", "max"),
