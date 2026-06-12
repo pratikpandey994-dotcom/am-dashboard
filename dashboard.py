@@ -843,43 +843,46 @@ def main() -> None:
 
     st.success(loaded.source_mode)
 
-    # Layout placeholders for Top Sections
-    metrics_placeholder = st.container()
-    tabs_placeholder = st.container()
-
     try:
         accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_logic(loaded.master, loaded.view1, loaded.view2)
     except Exception as exc:
         st.error(str(exc))
         return
 
-    # Dynamic Filters in Sidebar
-    with st.sidebar:
-        st.divider()
-        st.header("Data Filters")
-        
-        orig_master_cols = list(loaded.master.columns)
-        account_filter_cols = [c for c in accounts.columns if c in orig_master_cols]
-        
-        st.markdown("**Masterdata**")
-        selected_account_filters = st.multiselect("Add filter", account_filter_cols, default=[], key="ms_master")
-        
-        account_filter_values = {}
-        if selected_account_filters:
-            for col_name in selected_account_filters:
-                options = sorted(accounts[col_name].dropna().astype(str).unique().tolist())
-                account_filter_values[col_name] = st.multiselect(col_name, options, default=[])
+    st.markdown("#### Data Filters")
+    orig_master_cols = list(loaded.master.columns)
+    orig_view2_cols = list(loaded.view2.columns)
+    account_filter_cols = [c for c in accounts.columns if c in orig_master_cols]
+    view2_filter_cols = [c for c in view2_full.columns if c in orig_view2_cols and c not in account_filter_cols]
 
-        orig_view2_cols = list(loaded.view2.columns)
-        view2_filter_cols = [c for c in view2_full.columns if c in orig_view2_cols and c not in account_filter_cols]
+    f_col1, f_col2 = st.columns(2)
+    with f_col1:
+        selected_account_filters = st.multiselect("Masterdata Filter Columns", account_filter_cols, default=[], key="ms_master")
+    with f_col2:
+        selected_view2_filters = st.multiselect("Invoice Data Filter Columns", view2_filter_cols, default=[], key="ms_invoice")
 
-        st.markdown("**Invoice Data**")
-        selected_view2_filters = st.multiselect("Add filter", view2_filter_cols, default=[], key="ms_invoice")
-        view2_filter_values = {}
-        if selected_view2_filters:
-            for col_name in selected_view2_filters:
-                options = sorted(view2_full[col_name].dropna().astype(str).unique().tolist())
-                view2_filter_values[col_name] = st.multiselect(col_name, options, default=[])
+    account_filter_values = {}
+    view2_filter_values = {}
+
+    total_filters = len(selected_account_filters) + len(selected_view2_filters)
+    if total_filters > 0:
+        val_cols = st.columns(total_filters)
+        col_idx = 0
+        for col_name in selected_account_filters:
+            options = sorted(accounts[col_name].dropna().astype(str).unique().tolist())
+            with val_cols[col_idx]:
+                account_filter_values[col_name] = st.multiselect(f"Select {col_name}", options, default=[])
+            col_idx += 1
+        for col_name in selected_view2_filters:
+            options = sorted(view2_full[col_name].dropna().astype(str).unique().tolist())
+            with val_cols[col_idx]:
+                view2_filter_values[col_name] = st.multiselect(f"Select {col_name}", options, default=[])
+
+    st.divider()
+
+    # Layout placeholders for Top Sections
+    metrics_placeholder = st.container()
+    tabs_placeholder = st.container()
 
     filtered_accounts = accounts.copy()
     
