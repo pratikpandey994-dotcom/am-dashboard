@@ -851,28 +851,50 @@ def main() -> None:
     account_filter_cols = [c for c in accounts.columns if c in orig_master_cols]
     view2_filter_cols = [c for c in view2_full.columns if c in orig_view2_cols and c not in account_filter_cols]
 
-    f_col1, f_col2 = st.columns(2)
+    with st.sidebar:
+        st.divider()
+        st.header("Custom Filters")
+        st.markdown("**Masterdata**")
+        selected_account_filters = st.multiselect("Add filter", account_filter_cols, default=[], key="ms_master")
+        account_filter_values = {}
+        if selected_account_filters:
+            for col_name in selected_account_filters:
+                options = sorted(accounts[col_name].dropna().astype(str).unique().tolist())
+                account_filter_values[col_name] = st.multiselect(col_name, options, default=[])
+
+        st.markdown("**Invoice Data**")
+        selected_view2_filters = st.multiselect("Add filter", view2_filter_cols, default=[], key="ms_invoice")
+        view2_filter_values = {}
+        if selected_view2_filters:
+            for col_name in selected_view2_filters:
+                options = sorted(view2_full[col_name].dropna().astype(str).unique().tolist())
+                view2_filter_values[col_name] = st.multiselect(col_name, options, default=[])
+
+    st.markdown("#### Dashboard Filters")
+    f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+    
     with f_col1:
-        selected_account_filters = st.multiselect("Masterdata Filter Columns", account_filter_cols, default=[], key="ms_master")
+        am_options = sorted(accounts["am_names"].dropna().astype(str).unique().tolist())
+        selected_am = st.multiselect("AM Filter", am_options, default=[], key="main_am")
+    
     with f_col2:
-        selected_view2_filters = st.multiselect("Invoice Data Filter Columns", view2_filter_cols, default=[], key="ms_invoice")
+        if "settlement_date" in view2_full.columns:
+            settlement_dates = view2_full["settlement_date"].dropna().dt.strftime("%Y-%m-%d").unique().tolist()
+            settlement_options = sorted(settlement_dates)
+        else:
+            settlement_options = []
+        selected_settlement = st.multiselect("Settlement Filter", settlement_options, default=[], key="main_settlement")
 
-    account_filter_values = {}
-    view2_filter_values = {}
-
-    total_filters = len(selected_account_filters) + len(selected_view2_filters)
-    if total_filters > 0:
-        val_cols = st.columns(total_filters)
-        col_idx = 0
-        for col_name in selected_account_filters:
-            options = sorted(accounts[col_name].dropna().astype(str).unique().tolist())
-            with val_cols[col_idx]:
-                account_filter_values[col_name] = st.multiselect(f"Select {col_name}", options, default=[])
-            col_idx += 1
-        for col_name in selected_view2_filters:
-            options = sorted(view2_full[col_name].dropna().astype(str).unique().tolist())
-            with val_cols[col_idx]:
-                view2_filter_values[col_name] = st.multiselect(f"Select {col_name}", options, default=[])
+    with f_col3:
+        type_col = next((c for c in accounts.columns if "type" in str(c).lower()), None)
+        if not type_col:
+            type_col = next((c for c in accounts.columns if "team" in str(c).lower()), "team")
+        type_options = sorted(accounts[type_col].dropna().astype(str).unique().tolist()) if type_col in accounts.columns else []
+        selected_type = st.multiselect("Type Filter", type_options, default=[], key="main_type")
+        
+    with f_col4:
+        status_options = sorted(accounts["account_status"].dropna().astype(str).unique().tolist())
+        selected_status = st.multiselect("Account Status Filter", status_options, default=[], key="main_status")
 
     st.divider()
 
@@ -882,17 +904,28 @@ def main() -> None:
 
     filtered_accounts = accounts.copy()
     
-    # Apply Masterdata filters
+    # Apply Main Dashboard Filters
+    if selected_am:
+        filtered_accounts = filtered_accounts[filtered_accounts["am_names"].astype(str).isin(selected_am)]
+    if selected_status:
+        filtered_accounts = filtered_accounts[filtered_accounts["account_status"].astype(str).isin(selected_status)]
+    if selected_type and type_col in filtered_accounts.columns:
+        filtered_accounts = filtered_accounts[filtered_accounts[type_col].astype(str).isin(selected_type)]
+        
+    # Apply Masterdata custom filters
     for col_name, selected_vals in account_filter_values.items():
         if selected_vals:
             filtered_accounts = filtered_accounts[filtered_accounts[col_name].astype(str).isin(selected_vals)]
 
-    # Apply Invoice filters and cascade
-    if any(view2_filter_values.values()):
+    # Apply Invoice custom filters and Main Settlement filter
+    if any(view2_filter_values.values()) or selected_settlement:
         for col_name, selected_vals in view2_filter_values.items():
             if selected_vals:
                 view2_full = view2_full[view2_full[col_name].astype(str).isin(selected_vals)]
-        
+                
+        if selected_settlement and "settlement_date" in view2_full.columns:
+            view2_full = view2_full[view2_full["settlement_date"].dt.strftime("%Y-%m-%d").isin(selected_settlement)]
+            
         valid_buyers = view2_full["buyer_key"].unique()
         filtered_accounts = filtered_accounts[filtered_accounts["buyer_key"].isin(valid_buyers)]
 
