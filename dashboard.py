@@ -212,6 +212,7 @@ def classify_sheet(name: str, df: pd.DataFrame) -> Optional[str]:
     return None
 
 
+@st.cache_data(show_spinner=False)
 def load_uploaded_data(master_file, invoice_file) -> Optional[LoadedData]:
     if master_file and invoice_file:
         master_df = pd.read_excel(master_file)
