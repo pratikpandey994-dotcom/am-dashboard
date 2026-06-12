@@ -870,7 +870,6 @@ def main() -> None:
                 options = sorted(view2_full[col_name].dropna().astype(str).unique().tolist())
                 view2_filter_values[col_name] = st.multiselect(col_name, options, default=[])
 
-    st.markdown("#### Dashboard Filters")
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     
     with f_col1:
