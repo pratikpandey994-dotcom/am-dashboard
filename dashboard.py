@@ -1112,15 +1112,14 @@ def main() -> None:
                     .sort_values("accounts", ascending=False)
                     .head(15)
                 )
-                fig = px.bar(
-                    by_state.sort_values("accounts"),
-                    x="accounts",
-                    y="user_state",
-                    orientation="h",
-                    color="user_state",
-                    text="accounts",
+                fig = px.pie(
+                    by_state,
+                    values="accounts",
+                    names="user_state",
+                    hole=0.4,
                     labels={"accounts": "Unique Accounts", "user_state": "State"},
                 )
+                fig.update_traces(textposition='inside', textinfo='percent+label')
                 fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
                 st.plotly_chart(fig, use_container_width=True)
 
