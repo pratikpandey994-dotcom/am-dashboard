@@ -925,7 +925,14 @@ def main() -> None:
         selected_type = st.multiselect("Type Filter", type_options, default=[], key="main_type")
         
     with f_col4:
-        status_col = next((c for c in accounts.columns if "status" in str(c).lower() and c != "account_status"), "account_status")
+        status_col = None
+        for c in ["Account_Status", "Account Status", "ACCOUNT_STATUS", "USER_UTILIZATION_STATUS"]:
+            if c in accounts.columns:
+                status_col = c
+                break
+        if not status_col:
+            status_col = "account_status"
+        
         status_options = sorted(accounts[status_col].dropna().astype(str).unique().tolist())
         selected_status = st.multiselect("Account Status Filter", status_options, default=[], key="main_status")
 
