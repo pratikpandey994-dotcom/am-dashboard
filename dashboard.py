@@ -896,7 +896,7 @@ def main() -> None:
             [
                 "Portfolio",
                 "Invoices & Repayments",
-                "Inactive AM",
+                "Inactive Accounts",
                 "Top Accounts",
                 "Data",
             ]
@@ -972,29 +972,20 @@ def main() -> None:
             elif loaded.mode == "flexible":
                 st.info("💡 **Tip:** To see the Portfolio Outstanding Trend, make sure to map 'Disbursed Date' and 'Total Advanced' columns in the mapping section below.")
 
-            st.subheader("Accounts Requiring Attention")
-            attention = filtered_accounts[
-                filtered_accounts["alert_180_days"] | filtered_accounts["low_utilisation_after_repayment"]
-            ].sort_values(["alert_180_days", "post_repayment_util"], ascending=[False, True])
-            st.dataframe(
-                attention[
-                    [
-                        "buyer",
-                        "am_names",
-                        "account_status",
-                        "facility_size",
-                        "outstanding_balance",
-                        "utilisation_pct",
-                        "last_disbursed_date",
-                        "alert_180_days",
-                        "post_repayment_util",
-                        "low_utilisation_after_repayment",
-                    ]
-                ],
-                use_container_width=True,
-                hide_index=True,
-                column_config=dataframe_config(),
-            )
+            st.divider()
+            st.subheader("Utilisation Category Details")
+            selected_cat = st.selectbox("Select Utilisation Category", ["High", "Medium", "Low"], index=0)
+            
+            cat_df = filtered_accounts[filtered_accounts["utilisation_category"] == selected_cat]
+            if cat_df.empty:
+                st.info(f"No accounts found in {selected_cat} utilisation category.")
+            else:
+                st.dataframe(
+                    cat_df.sort_values("utilisation_pct", ascending=False),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=dataframe_config(),
+                )
 
         with view2_tab:
             st.header("Recent Invoices & Repayments")
@@ -1006,11 +997,13 @@ def main() -> None:
             # Safely calculate pending metrics
             pending_accounts_count = 0
             total_pending_amount = 0.0
+            pending_df = pd.DataFrame()
             
             if not view2_present.empty and "collect_amount" in view2_present.columns:
                 pending_rows = view2_present[view2_present["collect_amount"]]
                 if "buyer_key" in pending_rows.columns:
                     pending_accounts_count = pending_rows["buyer_key"].nunique()
+                    pending_df = pending_rows.groupby("buyer_key", as_index=False).agg({"payment_total_usd": "sum"}).rename(columns={"buyer_key": "Buyer", "payment_total_usd": "Pending Amount"})
                 if "payment_total_usd" in pending_rows.columns:
                     total_pending_amount = pending_rows["payment_total_usd"].sum()
 
@@ -1019,31 +1012,63 @@ def main() -> None:
             v2_mid.metric("Pending Amount", format_money(total_pending_amount))
             v2_right.metric("Total Repayment (Recent)", format_money(repayments_dedup["deduped_repayment"].sum()))
 
-            st.divider()
-            st.subheader("Expected Payments")
-            today = pd.Timestamp.today().normalize()
-            next_15_days = today + pd.Timedelta(days=15)
-            this_month_end = (today + pd.offsets.MonthEnd(0))
-            next_month_start = (today + pd.offsets.MonthBegin(1))
-            next_month_1st_week = next_month_start + pd.Timedelta(days=7)
+            if not pending_df.empty:
+                st.markdown("#### Pending Accounts Details")
+                st.dataframe(
+                    pending_df.sort_values("Pending Amount", ascending=False),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=dataframe_config()
+                )
 
-            def get_expected(df, start, end):
-                if df.empty: return 0.0
+            st.divider()
+            st.subheader("Expected Payments & Repayments")
+            col1, col2 = st.columns(2)
+            with col1:
+                from_date = st.date_input("From Date", pd.Timestamp.today().normalize())
+            with col2:
+                to_date = st.date_input("To Date", pd.Timestamp.today().normalize() + pd.Timedelta(days=15))
+
+            from_dt = pd.to_datetime(from_date)
+            to_dt = pd.to_datetime(to_date)
+
+            def get_filtered_expected(df, start, end):
+                if df.empty or "due_date_invoice" not in df.columns: return pd.DataFrame()
                 mask = (df["due_date_invoice"] >= start) & (df["due_date_invoice"] <= end) & (df["settlement_date"].isna())
-                return df[mask]["payment_total_usd"].sum()
+                return df[mask]
+                
+            def get_filtered_repayments(df, start, end):
+                if df.empty or "settlement_date" not in df.columns: return pd.DataFrame()
+                mask = (df["settlement_date"] >= start) & (df["settlement_date"] <= end)
+                return df[mask]
 
-            exp_15 = get_expected(view2_present, today, next_15_days)
-            exp_month = get_expected(view2_present, today.replace(day=1), this_month_end)
-            exp_next_week = get_expected(view2_present, next_month_start, next_month_1st_week)
+            expected_filtered = get_filtered_expected(view2_present, from_dt, to_dt)
+            repay_filtered = get_filtered_repayments(view2_present, from_dt, to_dt)
 
-            e1, e2, e3 = st.columns(3)
-            e1.metric("Next 15 Days", format_money(exp_15))
-            e2.metric("Entire Month", format_money(exp_month))
-            e3.metric("Next Month (1st Week)", format_money(exp_next_week))
+            e1, e2 = st.columns(2)
+            e1.metric("Expected Payments Count", f"{len(expected_filtered):,}")
+            e1.metric("Expected Payments Amount", format_money(expected_filtered['payment_total_usd'].sum() if not expected_filtered.empty else 0))
+            
+            e2.metric("Repayments Count", f"{len(repay_filtered):,}")
+            e2.metric("Repayments Amount", format_money(repay_filtered['payment_total_usd'].sum() if not repay_filtered.empty else 0))
+
+            st.markdown("#### Expected Payments")
+            if not expected_filtered.empty:
+                st.dataframe(expected_filtered.sort_values("due_date_invoice"), use_container_width=True, hide_index=True, column_config=dataframe_config())
+            else:
+                st.info("No expected payments in this range.")
+
+            st.markdown("#### Repayments")
+            if not repay_filtered.empty:
+                st.dataframe(repay_filtered.sort_values("settlement_date"), use_container_width=True, hide_index=True, column_config=dataframe_config())
+            else:
+                st.info("No repayments in this range.")
+
             st.divider()
-
+            
             repay_by_date = repayments_dedup.groupby("settlement_date", as_index=False)["deduped_repayment"].sum()
             if not repay_by_date.empty:
+                st.subheader("Unique Account Repayment Trends")
                 fig = px.line(
                     repay_by_date,
                     x="settlement_date",
@@ -1054,49 +1079,38 @@ def main() -> None:
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=310)
                 st.plotly_chart(fig, use_container_width=True)
 
-            st.subheader("Recent View 2 Activity")
-            if view2_present.empty:
-                st.warning("No activity found for the current or previous month. Check your date columns or mapping.")
-            else:
+        with inactive_tab:
+            st.header("Inactive Accounts")
+            inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
+            
+            st.subheader("Inactivity Aging Filter")
+            bucket_map = {
+                "121-150 Days": "alert_120_days",
+                "151-180 Days": "alert_150_days",
+                "181-356 Days": "alert_180_days",
+                "356+ Days": "alert_356_days",
+            }
+            selected_bucket = st.selectbox("Select Inactivity Bucket", list(bucket_map.keys()), index=0)
+            
+            bucket_col = bucket_map[selected_bucket]
+            bucket_df = inactive[inactive[bucket_col] == True]
+            
+            i_row1 = st.columns(3)
+            i_row1[0].metric(f"Accounts ({selected_bucket})", f"{len(bucket_df):,}")
+            i_row1[1].metric("Facility Size", format_money(bucket_df["facility_size"].sum()))
+            i_row1[2].metric("Outstanding Balance", format_money(bucket_df["outstanding_balance"].sum()))
+            
+            st.divider()
+            st.markdown(f"#### Accounts Inactive for {selected_bucket}")
+            if not bucket_df.empty:
                 st.dataframe(
-                    view2_present.sort_values(["collect_amount", "due_date_invoice"], ascending=[False, True]),
+                    bucket_df.sort_values("days_since_last_disbursed", ascending=False),
                     use_container_width=True,
                     hide_index=True,
                     column_config=dataframe_config(),
                 )
-
-            st.subheader("Deduped Repayments (Recent)")
-            st.dataframe(
-                repayments_dedup.sort_values("deduped_repayment", ascending=False),
-                use_container_width=True,
-                hide_index=True,
-                column_config=dataframe_config(),
-            )
-
-        with inactive_tab:
-            st.header("Workable-Inactive AM")
-            inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
-            
-            i_row1 = st.columns(3)
-            i_row1[0].metric("Inactive AM Accounts", f"{len(inactive):,}")
-            i_row1[1].metric("Facility Size", format_money(inactive["facility_size"].sum()))
-            i_row1[2].metric("Outstanding Balance", format_money(inactive["outstanding_balance"].sum()))
-            
-            st.divider()
-            st.subheader("Inactivity Aging (Days Since Last Activity)")
-            i_row2 = st.columns(4)
-            i_row2[0].metric("121-150 Days", f"{inactive['alert_120_days'].sum():,}")
-            i_row2[1].metric("151-180 Days", f"{inactive['alert_150_days'].sum():,}")
-            i_row2[2].metric("181-356 Days", f"{inactive['alert_180_days'].sum():,}")
-            i_row2[3].metric("356+ Days", f"{inactive['alert_356_days'].sum():,}")
-            st.divider()
-
-            st.dataframe(
-                inactive.sort_values("days_since_last_disbursed", ascending=False),
-                use_container_width=True,
-                hide_index=True,
-                column_config=dataframe_config(),
-            )
+            else:
+                st.info(f"No accounts found in the {selected_bucket} bucket.")
 
 
         with top_tab:
