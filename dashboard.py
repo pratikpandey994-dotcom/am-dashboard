@@ -734,8 +734,18 @@ def format_df(df: pd.DataFrame) -> pd.DataFrame:
     # Enforce logical column sequence
     existing_cols = list(df_renamed.columns)
     if existing_cols:
-        first_col = existing_cols[0]
-        remaining_cols = [c for c in existing_cols if c != first_col]
+        # Find the best candidate for the "Name" or "Buyer" column
+        name_col = None
+        for c in existing_cols:
+            c_low = str(c).lower()
+            if any(k in c_low for k in ["buyer", "company", "name", "importer", "cp"]):
+                name_col = c
+                break
+        
+        if not name_col:
+            name_col = existing_cols[0]
+            
+        remaining_cols = [c for c in existing_cols if c != name_col]
         
         important_metrics = [
             "Utilisation %", 
@@ -749,7 +759,7 @@ def format_df(df: pd.DataFrame) -> pd.DataFrame:
         metric_cols_present = [c for c in important_metrics if c in remaining_cols]
         other_cols = [c for c in remaining_cols if c not in metric_cols_present]
         
-        final_order = [first_col] + metric_cols_present + other_cols
+        final_order = [name_col] + metric_cols_present + other_cols
         return df_renamed[final_order]
         
     return df_renamed
