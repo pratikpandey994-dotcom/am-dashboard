@@ -925,7 +925,8 @@ def main() -> None:
         selected_type = st.multiselect("Type Filter", type_options, default=[], key="main_type")
         
     with f_col4:
-        status_options = sorted(accounts["account_status"].dropna().astype(str).unique().tolist())
+        status_col = next((c for c in accounts.columns if "status" in str(c).lower() and c != "account_status"), "account_status")
+        status_options = sorted(accounts[status_col].dropna().astype(str).unique().tolist())
         selected_status = st.multiselect("Account Status Filter", status_options, default=[], key="main_status")
 
     st.divider()
@@ -940,7 +941,7 @@ def main() -> None:
     if selected_am:
         filtered_accounts = filtered_accounts[filtered_accounts["am_names"].astype(str).isin(selected_am)]
     if selected_status:
-        filtered_accounts = filtered_accounts[filtered_accounts["account_status"].astype(str).isin(selected_status)]
+        filtered_accounts = filtered_accounts[filtered_accounts[status_col].astype(str).isin(selected_status)]
     if selected_type and type_col in filtered_accounts.columns:
         filtered_accounts = filtered_accounts[filtered_accounts[type_col].astype(str).isin(selected_type)]
         
@@ -1211,10 +1212,8 @@ def main() -> None:
                 st.dataframe(format_df(top15), use_container_width=True, hide_index=True, column_config=dataframe_config())
 
             with top_right:
-                st.subheader("Top 50 Team Direct by Facility Size")
-                # Use str.contains to robustly catch variations like "Direct ", "Direct Team", etc.
-                team_direct = filtered_accounts[filtered_accounts["team"].astype("string").str.contains("direct", case=False, na=False)]
-                top50 = team_direct.sort_values("facility_size", ascending=False).head(50)
+                st.subheader("Top 50 by Facility Size")
+                top50 = filtered_accounts.sort_values("facility_size", ascending=False).head(50)
                 fig = px.bar(
                     top50.head(20).sort_values("facility_size"),
                     x="facility_size",
