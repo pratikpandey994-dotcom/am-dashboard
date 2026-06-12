@@ -841,15 +841,11 @@ def main() -> None:
         render_upload_help()
         return
 
-    st.success(loaded.source_mode)
-
     try:
         accounts, view2_present, repayments_dedup, ob_trend, view2_full = build_logic(loaded.master, loaded.view1, loaded.view2)
     except Exception as exc:
         st.error(str(exc))
         return
-
-    st.markdown("#### Data Filters")
     orig_master_cols = list(loaded.master.columns)
     orig_view2_cols = list(loaded.view2.columns)
     account_filter_cols = [c for c in accounts.columns if c in orig_master_cols]
