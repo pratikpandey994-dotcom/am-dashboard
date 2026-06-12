@@ -729,7 +729,30 @@ def format_df(df: pd.DataFrame) -> pd.DataFrame:
         "am_master", "am_view1", "am_view2"
     ]
     df_clean = df.drop(columns=[c for c in internal_cols if c in df.columns], errors='ignore')
-    return df_clean.rename(columns=DISPLAY_NAMES)
+    df_renamed = df_clean.rename(columns=DISPLAY_NAMES)
+    
+    # Enforce logical column sequence
+    existing_cols = list(df_renamed.columns)
+    if existing_cols:
+        first_col = existing_cols[0]
+        remaining_cols = [c for c in existing_cols if c != first_col]
+        
+        important_metrics = [
+            "Utilisation %", 
+            "Post Repayment Util %", 
+            "Deduped Repayment",
+            "Adjusted Outstanding", 
+            "Utilisation Category",
+            "Days Inactive"
+        ]
+        
+        metric_cols_present = [c for c in important_metrics if c in remaining_cols]
+        other_cols = [c for c in remaining_cols if c not in metric_cols_present]
+        
+        final_order = [first_col] + metric_cols_present + other_cols
+        return df_renamed[final_order]
+        
+    return df_renamed
 
 def dataframe_config() -> Dict[str, object]:
     return {
@@ -993,10 +1016,6 @@ def main() -> None:
 
         with overview_tab:
             st.header("Portfolio Health")
-            st.markdown(
-                '<div class="section-note">Company-level view using Masterdata status, View 1 balances, and 180-day last-disbursed alerts.</div>',
-                unsafe_allow_html=True,
-            )
 
             left, right = st.columns([1.05, 1])
             with left:
