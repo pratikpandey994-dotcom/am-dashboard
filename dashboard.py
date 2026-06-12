@@ -11,9 +11,11 @@ import streamlit as st
 
 
 KEEP_STATUSES = {
-    "Workable-Active",
-    "Workable-Inactive (AM)",
-    "Workable-Temporarily suspended",
+    "Non Workable",
+    "Workable - Active",
+    "Workable - InActive BD",
+    "Workable - InActive AM",
+    "Workable - Temp Suspended",
 }
 
 
@@ -150,10 +152,31 @@ def normalize_name(value: object) -> str:
 
 
 def normalize_status(series: pd.Series) -> pd.Series:
-    return (
-        series.astype("string")
-        .str.strip()
-        .str.replace(r"\s+-\s+", "-", regex=True)
+    status_map = {
+        "non workable": "Non Workable",
+        "non-workable": "Non Workable",
+        "nonworkable": "Non Workable",
+        "workable - active": "Workable - Active",
+        "workable active": "Workable - Active",
+        "workable-active": "Workable - Active",
+        "workable - inactive bd": "Workable - InActive BD",
+        "workable inactive bd": "Workable - InActive BD",
+        "workable-inactive bd": "Workable - InActive BD",
+        "workable - inactive am": "Workable - InActive AM",
+        "workable inactive am": "Workable - InActive AM",
+        "workable-inactive am": "Workable - InActive AM",
+        "workable - inactive": "Workable - InActive AM",
+        "workable inactive": "Workable - InActive AM",
+        "workable- inactive": "Workable - InActive AM",
+        "workable - temp suspended": "Workable - Temp Suspended",
+        "workable temp suspended": "Workable - Temp Suspended",
+        "workable-temp suspended": "Workable - Temp Suspended",
+        "workable-temporarily suspended": "Workable - Temp Suspended",
+        "temp suspended": "Workable - Temp Suspended",
+        "suspended": "Workable - Temp Suspended"
+    }
+    return series.astype("string").str.strip().apply(
+        lambda x: status_map.get(str(x).lower(), "Unknown" if str(x).lower() == "nan" else x)
     )
 
 
@@ -262,6 +285,9 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
     require_columns(master, master_cols, "Masterdata")
     require_columns(view1, view1_cols, "View 1")
     require_columns(view2, view2_cols, "View 2")
+
+    if master_cols.get("Account_Status") and master_cols["Account_Status"] in master.columns:
+        master[master_cols["Account_Status"]] = normalize_status(master[master_cols["Account_Status"]])
 
     master_l = master.assign(
         buyer=master[master_cols["Buyer"]].astype("string").str.strip(),
@@ -528,10 +554,10 @@ def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) ->
     else:
         accounts["company"] = accounts["buyer"]
 
+    # Master logic
     if mapping.get("account_status"):
-        accounts["account_status"] = normalize_status(df[mapping["account_status"]])
-        if accounts["account_status"].isin(KEEP_STATUSES).any():
-            accounts = accounts[accounts["account_status"].isin(KEEP_STATUSES)].copy()
+        df[mapping["account_status"]] = normalize_status(df[mapping["account_status"]])
+        accounts["account_status"] = df[mapping["account_status"]]
     else:
         accounts["account_status"] = "Unknown"
 
@@ -1177,7 +1203,8 @@ def main() -> None:
 
         with inactive_tab:
             st.header("Inactive Accounts")
-            inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable-Inactive (AM)"].copy()
+            # Update to match new explicit category string
+            inactive = filtered_accounts[filtered_accounts["account_status"] == "Workable - InActive AM"].copy()
             
             st.markdown("#### All Inactive Accounts")
             
