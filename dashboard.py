@@ -697,20 +697,50 @@ def filter_accounts(df: pd.DataFrame, selected_ams: list[str], selected_statuses
     return filtered
 
 
+DISPLAY_NAMES = {
+    "buyer": "Buyer",
+    "company": "Company",
+    "account_status": "Account Status",
+    "team": "Team",
+    "am_names": "AM",
+    "outstanding_balance": "Outstanding Balance",
+    "facility_size": "Facility Size",
+    "last_disbursed_date": "Last Disbursed Date",
+    "days_since_last_disbursed": "Days Inactive",
+    "utilisation_pct": "Utilisation %",
+    "utilisation_category": "Utilisation Category",
+    "deduped_repayment": "Deduped Repayment",
+    "adjusted_outstanding": "Adjusted Outstanding",
+    "post_repayment_util": "Post Repayment Util %",
+    "low_utilisation_after_repayment": "Low Util After Repay",
+    "due_date_invoice": "Due Date",
+    "settlement_date": "Settlement Date",
+    "disbursed_date": "Disbursed Date",
+    "payment_total_usd": "Payment Total USD",
+    "total_advanced": "Total Advanced",
+    "am_view2": "AM Email"
+}
+
+def format_df(df: pd.DataFrame) -> pd.DataFrame:
+    drop_cols = ["buyer_key", "alert_120_days", "alert_150_days", "alert_180_days", "alert_356_days", "collect_amount"]
+    df_clean = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
+    return df_clean.rename(columns=DISPLAY_NAMES)
+
 def dataframe_config() -> Dict[str, object]:
     return {
-        "facility_size": st.column_config.NumberColumn("Facility Size", format="$ %.0f"),
-        "outstanding_balance": st.column_config.NumberColumn("Outstanding", format="$ %.0f"),
-        "utilisation_pct": st.column_config.NumberColumn("Utilisation %", format="%.1f%%"),
-        "deduped_repayment": st.column_config.NumberColumn("Deduped Repayment", format="$ %.0f"),
-        "adjusted_outstanding": st.column_config.NumberColumn("Adjusted Outstanding", format="$ %.0f"),
-        "post_repayment_util": st.column_config.NumberColumn("Post Repayment Util %", format="%.1f%%"),
-        "payment_total_usd": st.column_config.NumberColumn("Payment Total USD", format="$ %.0f"),
-        "deduped_repayment": st.column_config.NumberColumn("Deduped Repayment", format="$ %.0f"),
-        "last_disbursed_date": st.column_config.DateColumn("Last Disbursed"),
-        "due_date_invoice": st.column_config.DateColumn("Due Date"),
-        "settlement_date": st.column_config.DateColumn("Settlement Date"),
-        "disbursed_date": st.column_config.DateColumn("Disbursed Date"),
+        "Facility Size": st.column_config.NumberColumn("Facility Size", format="$ %.0f"),
+        "Outstanding Balance": st.column_config.NumberColumn("Outstanding Balance", format="$ %.0f"),
+        "Utilisation %": st.column_config.NumberColumn("Utilisation %", format="%.1f%%"),
+        "Deduped Repayment": st.column_config.NumberColumn("Deduped Repayment", format="$ %.0f"),
+        "Adjusted Outstanding": st.column_config.NumberColumn("Adjusted Outstanding", format="$ %.0f"),
+        "Post Repayment Util %": st.column_config.NumberColumn("Post Repayment Util %", format="%.1f%%"),
+        "Payment Total USD": st.column_config.NumberColumn("Payment Total USD", format="$ %.0f"),
+        "Total Advanced": st.column_config.NumberColumn("Total Advanced", format="$ %.0f"),
+        "Pending Amount": st.column_config.NumberColumn("Pending Amount", format="$ %.0f"),
+        "Last Disbursed Date": st.column_config.DateColumn("Last Disbursed Date"),
+        "Due Date": st.column_config.DateColumn("Due Date"),
+        "Settlement Date": st.column_config.DateColumn("Settlement Date"),
+        "Disbursed Date": st.column_config.DateColumn("Disbursed Date"),
     }
 
 
@@ -985,7 +1015,7 @@ def main() -> None:
                 st.info(f"No accounts found in {selected_cat} utilisation category.")
             else:
                 st.dataframe(
-                    cat_df.sort_values("utilisation_pct", ascending=False),
+                    format_df(cat_df.sort_values("utilisation_pct", ascending=False)),
                     use_container_width=True,
                     hide_index=True,
                     column_config=dataframe_config(),
@@ -1019,7 +1049,7 @@ def main() -> None:
             if not pending_df.empty:
                 st.markdown("#### Pending Accounts Details")
                 st.dataframe(
-                    pending_df.sort_values("Pending Amount", ascending=False),
+                    format_df(pending_df.sort_values("Pending Amount", ascending=False)),
                     use_container_width=True,
                     hide_index=True,
                     column_config=dataframe_config()
@@ -1058,13 +1088,13 @@ def main() -> None:
 
             st.markdown("#### Expected Payments")
             if not expected_filtered.empty:
-                st.dataframe(expected_filtered.sort_values("due_date_invoice"), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                st.dataframe(format_df(expected_filtered.sort_values("due_date_invoice")), use_container_width=True, hide_index=True, column_config=dataframe_config())
             else:
                 st.info("No expected payments in this range.")
 
             st.markdown("#### Repayments")
             if not repay_filtered.empty:
-                st.dataframe(repay_filtered.sort_values("settlement_date"), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                st.dataframe(format_df(repay_filtered.sort_values("settlement_date")), use_container_width=True, hide_index=True, column_config=dataframe_config())
             else:
                 st.info("No repayments in this range.")
 
@@ -1108,7 +1138,7 @@ def main() -> None:
             st.markdown(f"#### Accounts Inactive for {selected_bucket}")
             if not bucket_df.empty:
                 st.dataframe(
-                    bucket_df.sort_values("days_since_last_disbursed", ascending=False),
+                    format_df(bucket_df.sort_values("days_since_last_disbursed", ascending=False)),
                     use_container_width=True,
                     hide_index=True,
                     column_config=dataframe_config(),
@@ -1135,7 +1165,7 @@ def main() -> None:
                 )
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
                 st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(top15, use_container_width=True, hide_index=True, column_config=dataframe_config())
+                st.dataframe(format_df(top15), use_container_width=True, hide_index=True, column_config=dataframe_config())
 
             with top_right:
                 st.subheader("Top 50 Team Direct by Facility Size")
@@ -1151,14 +1181,14 @@ def main() -> None:
                 )
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
                 st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(top50, use_container_width=True, hide_index=True, column_config=dataframe_config())
+                st.dataframe(format_df(top50), use_container_width=True, hide_index=True, column_config=dataframe_config())
 
         with data_tab:
             st.header("Logical Data")
             st.subheader("Accounts Logic Table")
-            st.dataframe(filtered_accounts, use_container_width=True, hide_index=True, column_config=dataframe_config())
+            st.dataframe(format_df(filtered_accounts), use_container_width=True, hide_index=True, column_config=dataframe_config())
             st.subheader("Raw Recent View 2 Logic Table")
-            st.dataframe(view2_present, use_container_width=True, hide_index=True, column_config=dataframe_config())
+            st.dataframe(format_df(view2_present), use_container_width=True, hide_index=True, column_config=dataframe_config())
 
 
 if __name__ == "__main__":
