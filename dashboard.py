@@ -283,7 +283,8 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date", "Disbursed Date", "FIRST_ADVANCE_DATE", "INVOICE_DATE"]),
         "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced", "Origination", "TOTAL_ADVANCED"]),
     }
-    require_columns(master, master_cols, "Masterdata")
+    master_req = {k: v for k, v in master_cols.items() if k != "User_State"}
+    require_columns(master, master_req, "Masterdata")
     require_columns(view1, view1_cols, "View 1")
     require_columns(view2, view2_cols, "View 2")
 
