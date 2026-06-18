@@ -18,6 +18,30 @@ KEEP_STATUSES = {
     "Workable - Temp Suspended",
 }
 
+STATE_ABBR = {
+    'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA',
+    'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE', 'Florida': 'FL', 'Georgia': 'GA',
+    'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
+    'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+    'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO',
+    'Montana': 'MT', 'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ',
+    'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
+    'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC',
+    'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT', 'Vermont': 'VT',
+    'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+    'District of Columbia': 'DC'
+}
+
+THEME_PALETTE = [
+    "#157f3b", "#3b82f6", "#0d9488", "#c47a00", "#b42318", # Bases (Green, Blue, Teal, Orange, Red)
+    "#34d399", "#60a5fa", "#2dd4bf", "#fbbf24", "#f87171", # Lights
+    "#064e3b", "#1e3a8a", "#115e59", "#78350f", "#7f1d1d", # Darks
+    "#a7f3d0", "#dbeafe", "#ccfbf1", "#fef3c7", "#fecaca"  # Lighters
+]
+TEAL_SCALE = ["#ccfbf1", "#2dd4bf", "#0d9488", "#115e59"]
+BLUE_SCALE = ["#dbeafe", "#60a5fa", "#3b82f6", "#1e3a8a"]
+GREEN_SCALE = ["#a7f3d0", "#34d399", "#157f3b", "#064e3b"]
+
 
 @dataclass(frozen=True)
 class LoadedData:
@@ -236,7 +260,7 @@ def classify_sheet(name: str, df: pd.DataFrame) -> Optional[str]:
     return None
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, persist="disk")
 def get_excel_data(file_bytes: bytes) -> pd.DataFrame:
     return pd.read_excel(io.BytesIO(file_bytes))
 
@@ -255,7 +279,7 @@ def load_uploaded_data(master_file, invoice_file) -> Optional[LoadedData]:
     return None
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, persist="disk")
 def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     master_cols = {
         "Buyer": first_existing(master, ["Buyer", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"]),
@@ -266,6 +290,9 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "Facility_Size": first_existing(master, ["Facility_Size", "Facility Size", "FACILITY_SIZE", "TOTAL_LIMIT"]),
         "OB": first_existing(master, ["OB", "Outstanding Balance", "OUTSTANDING_ADVANCE_BALANCE_USD"]),
         "Last_Disbursed_Date": first_existing(master, ["Last_Disbursed_Date", "Last Disbursed Date", "LAST_DISBURSED_DATE"]),
+    }
+    master_opt_cols = {
+        "Industry": first_existing(master, ["Industry", "AIRTABLE_INDUSTRY", "INDUSTRY"]),
     }
     view1_cols = {
         "company": first_existing(view1, ["company", "Buyer", "Account", "IMPORTER_NAME", "IMPORTER_COMPANY", "CP_COMPANY"]),
@@ -282,6 +309,12 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "payment_total_usd": first_existing(view2, ["payment_total_usd", "payment total usd", "payment", "Amount", "MARGIN_RECEIVED_USD", "INVOICE_VALUE_USD"]),
         "disbursed_date": first_existing(view2, ["disbursed_date", "disbursed date", "disbursement date", "Disbursed Date", "FIRST_ADVANCE_DATE", "INVOICE_DATE"]),
         "total_advanced": first_existing(view2, ["total_advanced", "total advanced", "Total Advanced", "Origination", "TOTAL_ADVANCED"]),
+    }
+    view2_opt_cols = {
+        "invoice_id": first_existing(view2, ["INVOICE_ID", "Invoice ID", "invoice id"]),
+        "exporter_company": first_existing(view2, ["EXPORTER_COMPANY", "Exporter Company", "exporter", "Seller", "EXPORTER_USER_ID"]),
+        "exporter_country": first_existing(view2, ["EXPORTER_COUNTRY", "Exporter Country", "BUYER_COUNTRY"]),
+        "margin_received_date": first_existing(view2, ["MARGIN_RECEIVED_DATE", "Margin Received Date", "margin_received_date"]),
     }
     master_req = {k: v for k, v in master_cols.items() if k != "User_State"}
     require_columns(master, master_req, "Masterdata")
@@ -301,6 +334,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         facility_size_master=to_number(master[master_cols["Facility_Size"]]),
         outstanding_balance_master=to_number(master[master_cols["OB"]]),
         last_disbursed_date_master=to_date(master[master_cols["Last_Disbursed_Date"]]),
+        industry=master[master_opt_cols["Industry"]].astype("string").str.strip() if master_opt_cols.get("Industry") else "Unknown",
     )
     # Dedup Master by buyer_key and keep original columns
     agg_dict = {col: "first" for col in master.columns}
@@ -310,6 +344,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "user_state": "first",
         "am_master": "first",
         "team": "first",
+        "industry": "first",
         "facility_size_master": "max",
         "outstanding_balance_master": "max",
         "last_disbursed_date_master": "max",
@@ -386,6 +421,10 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         disbursed_date=to_date(view2[view2_cols["disbursed_date"]]),
         payment_total_usd=to_number(view2[view2_cols["payment_total_usd"]]),
         total_advanced=to_number(view2[view2_cols["total_advanced"]]),
+        invoice_id=view2[view2_opt_cols["invoice_id"]].astype("string").str.strip() if view2_opt_cols.get("invoice_id") else pd.NA,
+        exporter_company=view2[view2_opt_cols["exporter_company"]].astype("string").str.strip() if view2_opt_cols.get("exporter_company") else pd.NA,
+        exporter_country=view2[view2_opt_cols["exporter_country"]].astype("string").str.strip() if view2_opt_cols.get("exporter_country") else pd.NA,
+        margin_received_date=to_date(view2[view2_opt_cols["margin_received_date"]]) if view2_opt_cols.get("margin_received_date") else pd.NaT,
     )
 
     # Invoices & Repayments: cover current and previous month for better visibility
@@ -431,6 +470,7 @@ def build_logic(master: pd.DataFrame, view1: pd.DataFrame, view2: pd.DataFrame) 
         "account_status",
         "user_state",
         "team",
+        "industry",
         "am_names",
         "outstanding_balance",
         "facility_size",
@@ -540,7 +580,7 @@ def render_flexible_mapping(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     }
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, persist="disk")
 def build_flexible_logic(df: pd.DataFrame, mapping: Dict[str, Optional[str]]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     if not mapping.get("buyer"):
         raise ValueError("Please select a Buyer / Account column for single-sheet mode.")
@@ -884,6 +924,31 @@ def get_sample_data() -> LoadedData:
     )
 
 
+def get_new_selection(event, chart_key):
+    if "prev_sel" not in st.session_state:
+        st.session_state.prev_sel = {}
+    current_points = []
+    if event and hasattr(event, "selection"):
+        current_points = getattr(event.selection, "points", [])
+    prev_points = st.session_state.prev_sel.get(chart_key, [])
+    if current_points != prev_points:
+        st.session_state.prev_sel[chart_key] = current_points
+        if current_points:
+            return current_points[0]
+    return None
+
+@st.dialog("Drilldown Details", width="large")
+def show_details(df_subset: pd.DataFrame, title: str):
+    st.markdown(f"### {title}")
+    st.caption(f"Showing {len(df_subset)} records.")
+    st.dataframe(
+        format_df(df_subset),
+        use_container_width=True,
+        hide_index=True,
+        column_config=dataframe_config()
+    )
+
+
 def main() -> None:
     inject_style()
 
@@ -1068,13 +1133,13 @@ def main() -> None:
         metric_cols[5].metric("Unassigned", f"{(filtered_accounts['am_names'] == 'Unassigned').sum():,}")
 
     with tabs_placeholder:
-        overview_tab, view2_tab, inactive_tab, top_tab, data_tab = st.tabs(
+        overview_tab, view2_tab, inactive_tab, top_tab, account_analysis_tab = st.tabs(
             [
                 "Portfolio",
                 "Invoices & Repayments",
                 "Inactive Accounts",
                 "Top Accounts",
-                "Data",
+                "Account Analysis",
             ]
         )
 
@@ -1094,66 +1159,77 @@ def main() -> None:
                 util_counts.columns = ["Utilisation Category", "Accounts"]
                 fig = px.bar(
                     util_counts,
-                    x="Utilisation Category",
-                    y="Accounts",
+                    y="Utilisation Category",
+                    x="Accounts",
+                    orientation="h",
                     color="Utilisation Category",
                     text="Accounts",
                     color_discrete_map={"High": "#157f3b", "Medium": "#c47a00", "Low": "#b42318"},
                 )
                 fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
-                st.plotly_chart(fig, use_container_width=True)
+                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="chart_util_cat")
+                pt = get_new_selection(event, "chart_util_cat")
+                if pt:
+                    cat = pt.get("y")
+                    subset = filtered_accounts[filtered_accounts["utilisation_category"] == cat]
+                    show_details(subset, f"Accounts with {cat} Utilisation")
 
             with right:
                 st.subheader("Distribution by User State")
-                by_state = (
-                    filtered_accounts.groupby("user_state", as_index=False)
-                    .agg(
-                        accounts=("buyer", "nunique"),
+                state_data = filtered_accounts.dropna(subset=["user_state"]).copy()
+                if not state_data.empty:
+                    state_data["state_abbr"] = state_data["user_state"].map(STATE_ABBR).fillna(state_data["user_state"])
+                    by_state = (
+                        state_data.groupby("state_abbr", as_index=False)
+                        .agg(accounts=("buyer", "nunique"))
                     )
+                    fig = px.choropleth(
+                        by_state,
+                        locations="state_abbr",
+                        locationmode="USA-states",
+                        color="accounts",
+                        color_continuous_scale=BLUE_SCALE,
+                        scope="usa",
+                        labels={"accounts": "Unique Accounts", "state_abbr": "State"}
+                    )
+                    fig.update_layout(dragmode=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
+                    event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="chart_user_state", config={'scrollZoom': False, 'displayModeBar': False})
+                    pt = get_new_selection(event, "chart_user_state")
+                    if pt:
+                        state_clicked = pt.get("location", pt.get("x"))
+                        subset = state_data[state_data["state_abbr"] == state_clicked]
+                        show_details(subset, f"Accounts in {state_clicked}")
+                else:
+                    st.info("No user state data available.")
+
+            st.subheader("Industry Distribution of Accounts")
+            if "industry" in filtered_accounts.columns and not filtered_accounts["industry"].isna().all():
+                by_industry = (
+                    filtered_accounts.groupby("industry", as_index=False)
+                    .agg(accounts=("buyer", "nunique"))
                     .sort_values("accounts", ascending=False)
                     .head(15)
                 )
                 fig = px.pie(
-                    by_state,
+                    by_industry,
                     values="accounts",
-                    names="user_state",
+                    names="industry",
+                    custom_data=["industry"],
                     hole=0.4,
-                    labels={"accounts": "Unique Accounts", "user_state": "State"},
+                    color_discrete_sequence=THEME_PALETTE,
+                    labels={"industry": "Industry", "accounts": "Accounts"}
                 )
                 fig.update_traces(textposition='inside', textinfo='percent+label')
-                fig.update_layout(showlegend=False, margin=dict(l=10, r=10, t=20, b=10), height=330)
-                st.plotly_chart(fig, use_container_width=True)
-
-            if not ob_trend_reactive.empty:
-                st.subheader("Portfolio OB Trend (Past 6 Months)")
-                fig = px.area(
-                    ob_trend_reactive,
-                    x="Month",
-                    y="Outstanding Balance",
-                    markers=True,
-                    text="Label",
-                    color_discrete_sequence=["#008080"],
-                )
-                fig.update_traces(textposition="top center")
-                fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=380)
-                st.plotly_chart(fig, use_container_width=True)
-            elif loaded.mode == "flexible":
-                st.info("💡 **Tip:** To see the Portfolio Outstanding Trend, make sure to map 'Disbursed Date' and 'Total Advanced' columns in the mapping section below.")
-
-            st.divider()
-            st.subheader("Utilisation Category Details")
-            selected_cat = st.selectbox("Select Utilisation Category", ["High", "Medium", "Low"], index=0)
-            
-            cat_df = filtered_accounts[filtered_accounts["utilisation_category"] == selected_cat]
-            if cat_df.empty:
-                st.info(f"No accounts found in {selected_cat} utilisation category.")
+                fig.update_layout(showlegend=True, legend=dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.05), margin=dict(l=10, r=10, t=20, b=10), height=380)
+                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="chart_industry")
+                pt = get_new_selection(event, "chart_industry")
+                if pt:
+                    ind_clicked = pt.get("customdata", [None])[0]
+                    subset = filtered_accounts[filtered_accounts["industry"] == ind_clicked]
+                    show_details(subset, f"Accounts in {ind_clicked} Industry")
             else:
-                st.dataframe(
-                    format_df(cat_df.sort_values("utilisation_pct", ascending=False)),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config=dataframe_config(),
-                )
+                st.info("No industry data available.")
+
 
         with view2_tab:
             st.header("Expected Payments & Repayments")
@@ -1191,14 +1267,30 @@ def main() -> None:
             with t1:
                 st.markdown("#### Expected Payments")
                 if not expected_filtered.empty:
-                    st.dataframe(format_df(expected_filtered.sort_values("due_date_invoice")), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                    exp_by_date = expected_filtered.groupby("due_date_invoice", as_index=False)["payment_total_usd"].sum()
+                    fig_exp = px.bar(exp_by_date, x="due_date_invoice", y="payment_total_usd", color_discrete_sequence=["#c47a00"])
+                    fig_exp.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=300)
+                    event1 = st.plotly_chart(fig_exp, use_container_width=True, on_select="rerun", key="chart_exp_payments")
+                    pt1 = get_new_selection(event1, "chart_exp_payments")
+                    if pt1:
+                        date_clicked = pt1.get("x")
+                        subset = expected_filtered[expected_filtered["due_date_invoice"] == pd.to_datetime(date_clicked)]
+                        show_details(subset, f"Expected Payments on {date_clicked}")
                 else:
                     st.info("No expected payments in this range.")
 
             with t2:
                 st.markdown("#### Repayments")
                 if not repay_filtered.empty:
-                    st.dataframe(format_df(repay_filtered.sort_values("settlement_date")), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                    rep_by_date = repay_filtered.groupby("settlement_date", as_index=False)["payment_total_usd"].sum()
+                    fig_rep = px.bar(rep_by_date, x="settlement_date", y="payment_total_usd", color_discrete_sequence=["#157f3b"])
+                    fig_rep.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=300)
+                    event2 = st.plotly_chart(fig_rep, use_container_width=True, on_select="rerun", key="chart_repayments")
+                    pt2 = get_new_selection(event2, "chart_repayments")
+                    if pt2:
+                        date_clicked = pt2.get("x")
+                        subset = repay_filtered[repay_filtered["settlement_date"] == pd.to_datetime(date_clicked)]
+                        show_details(subset, f"Repayments on {date_clicked}")
                 else:
                     st.info("No repayments in this range.")
 
@@ -1215,7 +1307,12 @@ def main() -> None:
                     labels={"settlement_date": "Settlement Date", "deduped_repayment": "Deduped Repayment"},
                 )
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=310)
-                st.plotly_chart(fig, use_container_width=True)
+                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="chart_repay_trends")
+                pt = get_new_selection(event, "chart_repay_trends")
+                if pt:
+                    date_clicked = pt.get("x")
+                    subset = repayments_dedup[repayments_dedup["settlement_date"] == pd.to_datetime(date_clicked)]
+                    show_details(subset, f"Repayments on {date_clicked}")
 
         with inactive_tab:
             st.header("Inactive Accounts")
@@ -1231,12 +1328,21 @@ def main() -> None:
             
             st.divider()
             if not inactive.empty:
-                st.dataframe(
-                    format_df(inactive.sort_values("days_since_last_disbursed", ascending=False)),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config=dataframe_config(),
+                fig_inact = px.bar(
+                    inactive.sort_values("days_since_last_disbursed", ascending=False).head(50),
+                    x="buyer",
+                    y="days_since_last_disbursed",
+                    color="outstanding_balance",
+                    color_continuous_scale=TEAL_SCALE,
+                    labels={"buyer": "Account", "days_since_last_disbursed": "Days Inactive", "outstanding_balance": "Outstanding Balance"}
                 )
+                fig_inact.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=400)
+                event = st.plotly_chart(fig_inact, use_container_width=True, on_select="rerun", key="chart_inactive")
+                pt = get_new_selection(event, "chart_inactive")
+                if pt:
+                    buyer_clicked = pt.get("x")
+                    subset = inactive[inactive["buyer"] == buyer_clicked]
+                    show_details(subset, f"Inactive Account Details: {buyer_clicked}")
             else:
                 st.info("No inactive accounts found.")
 
@@ -1246,20 +1352,30 @@ def main() -> None:
             top_left, top_right = st.columns(2)
 
             with top_left:
-                st.subheader("Top 15 by Facility Size")
-                top15 = filtered_accounts.sort_values("facility_size", ascending=False).head(15)
-                fig = px.bar(
-                    top15.sort_values("facility_size"),
-                    x="facility_size",
-                    y="buyer",
-                    orientation="h",
-                    color="utilisation_pct",
-                    color_continuous_scale=["#216e8c", "#f79009", "#b42318"],
-                    labels={"facility_size": "Facility Size", "buyer": "Buyer", "utilisation_pct": "Utilisation %"},
-                )
-                fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(format_df(top15), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                st.subheader("Account Exposure Overview")
+                scatter_df = filtered_accounts.dropna(subset=["facility_size", "outstanding_balance"]).copy()
+                if not scatter_df.empty:
+                    fig_scatter = px.scatter(
+                        scatter_df,
+                        x="facility_size",
+                        y="outstanding_balance",
+                        color="account_status",
+                        size="utilisation_pct",
+                        hover_name="buyer",
+                        custom_data=["buyer"],
+                        labels={"facility_size": "Facility Size", "outstanding_balance": "Outstanding Balance", "account_status": "Status", "utilisation_pct": "Utilisation %"},
+                        size_max=30,
+                        opacity=0.7,
+                    )
+                    fig_scatter.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
+                    event = st.plotly_chart(fig_scatter, use_container_width=True, on_select="rerun", key="chart_exposure")
+                    pt = get_new_selection(event, "chart_exposure")
+                    if pt:
+                        buyer_clicked = pt.get("customdata", [None])[0]
+                        subset = filtered_accounts[filtered_accounts["buyer"] == buyer_clicked]
+                        show_details(subset, f"Exposure Details: {buyer_clicked}")
+                else:
+                    st.info("No facility size or outstanding balance data available.")
 
             with top_right:
                 st.subheader("Top 50 by Facility Size")
@@ -1273,15 +1389,150 @@ def main() -> None:
                     labels={"facility_size": "Facility Size", "buyer": "Buyer", "account_status": "Status"},
                 )
                 fig.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=430)
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(format_df(top50), use_container_width=True, hide_index=True, column_config=dataframe_config())
+                event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="chart_top50")
+                pt = get_new_selection(event, "chart_top50")
+                if pt:
+                    buyer_clicked = pt.get("y")
+                    subset = filtered_accounts[filtered_accounts["buyer"] == buyer_clicked]
+                    show_details(subset, f"Facility Details: {buyer_clicked}")
 
-        with data_tab:
-            st.header("Logical Data")
-            st.subheader("Accounts Logic Table")
-            st.dataframe(format_df(filtered_accounts), use_container_width=True, hide_index=True, column_config=dataframe_config())
-            st.subheader("Raw Recent View 2 Logic Table")
-            st.dataframe(format_df(view2_present), use_container_width=True, hide_index=True, column_config=dataframe_config())
+        with account_analysis_tab:
+            st.header("Account Analysis")
+            if filtered_accounts.empty:
+                st.info("No accounts available for the selected AM(s).")
+            else:
+                account_options = filtered_accounts["buyer_key"].unique()
+                buyer_map = dict(zip(filtered_accounts["buyer_key"], filtered_accounts["company"]))
+                selected_buyer_key = st.selectbox(
+                    "Select an Account",
+                    options=account_options,
+                    format_func=lambda x: f"{buyer_map.get(x, x)} ({x})"
+                )
+
+                if selected_buyer_key:
+                    st.divider()
+                    st.subheader(f"Analysis for {buyer_map.get(selected_buyer_key, selected_buyer_key)}")
+                    
+                    acc_view2 = view2_full[view2_full["buyer_key"] == selected_buyer_key].copy()
+                    
+                    if acc_view2.empty:
+                        st.warning("No invoice data found for this account.")
+                    else:
+                        c1, c2 = st.columns(2)
+                        
+                        unique_exporters = acc_view2["exporter_company"].nunique() if "exporter_company" in acc_view2.columns and not acc_view2["exporter_company"].isna().all() else 0
+                        unique_invoices = acc_view2["invoice_id"].nunique() if "invoice_id" in acc_view2.columns and not acc_view2["invoice_id"].isna().all() else len(acc_view2)
+                        
+                        c1.metric("Unique Exporters", f"{unique_exporters:,}")
+                        c2.metric("Unique Invoices Funded", f"{unique_invoices:,}")
+                        
+                        st.markdown("#### Repayment & Margin Track")
+                        repayment_counts = {}
+                        settled_invoices = acc_view2.dropna(subset=["settlement_date", "due_date_invoice"]).copy()
+                        if not settled_invoices.empty:
+                            def classify_repayment(row):
+                                diff = (row["settlement_date"] - row["due_date_invoice"]).days
+                                if diff < -3: return "Prior Payment"
+                                elif diff <= 3: return "On Time"
+                                else: return "Delayed"
+                            settled_invoices["repayment_status"] = settled_invoices.apply(classify_repayment, axis=1)
+                            repayment_counts = settled_invoices["repayment_status"].value_counts().to_dict()
+                        
+                        margin_counts = {}
+                        if "margin_received_date" in acc_view2.columns:
+                            margin_paid = acc_view2.dropna(subset=["margin_received_date", "disbursed_date"]).copy()
+                            if not margin_paid.empty:
+                                def classify_margin(row):
+                                    diff = (row["margin_received_date"] - row["disbursed_date"]).days
+                                    if diff < -3: return "Prior Payment"
+                                    elif diff <= 3: return "On Time"
+                                    else: return "Delayed"
+                                margin_paid["margin_status"] = margin_paid.apply(classify_margin, axis=1)
+                                margin_counts = margin_paid["margin_status"].value_counts().to_dict()
+                        
+                        if repayment_counts or margin_counts:
+                            track_data = []
+                            for status in ["Prior Payment", "On Time", "Delayed"]:
+                                track_data.append({"Track": "Repayment", "Status": status, "Count": repayment_counts.get(status, 0)})
+                                track_data.append({"Track": "Margin", "Status": status, "Count": margin_counts.get(status, 0)})
+                            track_df = pd.DataFrame(track_data)
+                            
+                            track_df["Total"] = track_df.groupby("Track")["Count"].transform("sum")
+                            track_df["Percentage"] = (track_df["Count"] / track_df["Total"]) * 100
+                            track_df["Percentage"] = track_df["Percentage"].fillna(0)
+                            
+                            fig_track = px.bar(
+                                track_df,
+                                y="Track",
+                                x="Percentage",
+                                color="Status",
+                                orientation="h",
+                                barmode="stack",
+                                color_discrete_map={"Prior Payment": "#157f3b", "On Time": "#3b82f6", "Delayed": "#b42318"}
+                            )
+                            fig_track.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=250, xaxis_title="% of Invoices", yaxis_title="")
+                            event = st.plotly_chart(fig_track, use_container_width=True, on_select="rerun", key="chart_track")
+                            pt = get_new_selection(event, "chart_track")
+                            if pt:
+                                track_clicked = pt.get("y")
+                                show_details(acc_view2, f"Invoice History: {selected_buyer_key} ({track_clicked} track)")
+                        else:
+                            st.info("No repayment or margin data available to track.")
+                            
+                        col_trend, col_geo = st.columns(2)
+                        with col_trend:
+                            st.markdown("#### Invoice Submission Trend")
+                            trend_df = acc_view2.dropna(subset=["disbursed_date"]).copy()
+                            if not trend_df.empty:
+                                trend_df["disbursed_month"] = trend_df["disbursed_date"].dt.to_period("M").dt.to_timestamp()
+                                trend_grouped = trend_df.groupby("disbursed_month").size().reset_index(name="Invoice Count")
+                                fig_trend = px.line(
+                                    trend_grouped, 
+                                    x="disbursed_month", 
+                                    y="Invoice Count", 
+                                    markers=True,
+                                    color_discrete_sequence=["#0d9488"],
+                                    labels={"disbursed_month": "Disbursement Month", "Invoice Count": "Invoices Submitted"}
+                                )
+                                fig_trend.update_layout(margin=dict(l=10, r=10, t=20, b=10), height=300)
+                                event = st.plotly_chart(fig_trend, use_container_width=True, on_select="rerun", key="chart_trend")
+                                pt = get_new_selection(event, "chart_trend")
+                                if pt:
+                                    month_clicked = pt.get("x")
+                                    show_details(acc_view2, f"Invoices around {month_clicked}")
+                            else:
+                                st.info("No disbursed dates available for trend analysis.")
+                                
+                        with col_geo:
+                            if "exporter_country" in acc_view2.columns and not acc_view2["exporter_country"].isna().all():
+                                st.markdown("#### Exporter Country Analysis")
+                                country_counts = acc_view2["exporter_country"].value_counts().reset_index()
+                                country_counts.columns = ["Country", "Count"]
+                                fig_country = px.scatter_geo(
+                                    country_counts,
+                                    locations="Country",
+                                    locationmode="country names",
+                                    size="Count",
+                                    color="Count",
+                                    color_continuous_scale=TEAL_SCALE,
+                                    projection="orthographic",
+                                )
+                                fig_country.update_geos(
+                                    showcountries=True, countrycolor="#cbd5e1",
+                                    showocean=True, oceancolor="#f8fafc",
+                                    showland=True, landcolor="#e2e8f0",
+                                    showframe=False,
+                                    projection_rotation={"lat": 20, "lon": -40}
+                                )
+                                fig_country.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=400, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                                event = st.plotly_chart(fig_country, use_container_width=True, on_select="rerun", key="chart_globe")
+                                pt = get_new_selection(event, "chart_globe")
+                                if pt:
+                                    country_clicked = pt.get("location")
+                                    subset = acc_view2[acc_view2["exporter_country"] == country_clicked]
+                                    show_details(subset, f"Invoices for Exporter Country: {country_clicked}")
+                            else:
+                                st.info("No exporter country data available.")
 
 
 if __name__ == "__main__":
